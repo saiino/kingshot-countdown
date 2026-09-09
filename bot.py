@@ -179,12 +179,16 @@ async def play_countdown(interaction, start, end):
         after=lambda error: loop.call_soon_threadsafe(finished.set),
     )
 
-    await respond(interaction, f"{start} → {end} のカウントを流します。")
+    # 何を流しているかを明示する。指定した秒数と違えばここで気づける。
+    seconds = len(pcm) / DISCORD_BYTES_PER_SECOND
+    await respond(
+        interaction,
+        f"**{start} → {end}** を流します。（{start - end + 1}個の数字 / 全体で約{seconds:.0f}秒）",
+    )
 
     # 異常切断などで after が呼ばれないと、ここで永久に待ち続けてしまう。
     # そうなると voice_client が繋がったままになり、以降ずっと
     # 「いま再生中です」と言い続ける詰み状態になる。長さ+30秒で打ち切る。
-    seconds = len(pcm) / DISCORD_BYTES_PER_SECOND
     try:
         await asyncio.wait_for(finished.wait(), timeout=seconds + 30)
     except asyncio.TimeoutError:
@@ -280,16 +284,17 @@ client = ShutsujinBell()
 
 @client.tree.command(name="countdown", description="秒数を指定して出陣カウントダウンを流します")
 @app_commands.describe(
-    start="開始する残り秒数（必須。例: 45）",
-    end="終了する残り秒数（省略すると0まで）",
+    start="開始する残り秒数（例: 60）",
+    end="終了する残り秒数（0まで読むなら 0）",
 )
 async def countdown_command(
     interaction: discord.Interaction,
-    # start をあえて必須にしている。省略可にすると、値を入れずに送信できてしまい、
-    # 「50と打ったのに45が流れる」という気づきにくい事故が起きる。
-    # Range を使うと範囲チェックをDiscord側がやってくれる。
+    # start も end もあえて必須にしている。省略可にすると、値をフィールドに
+    # 入れないまま送信できてしまい、黙って既定値が使われる。
+    # 「65 40 と打ったのに 65→0 が流れる」という気づきにくい事故が実際に起きた。
+    # Range を使うと範囲チェックはDiscord側がやってくれる。
     start: app_commands.Range[int, 1, 300],
-    end: app_commands.Range[int, 0, 299] = 0,
+    end: app_commands.Range[int, 0, 299],
 ):
     if start <= end:
         await respond(interaction, f"開始({start})は終了({end})より大きくしてください。")
