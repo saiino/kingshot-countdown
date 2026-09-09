@@ -181,10 +181,7 @@ async def play_countdown(interaction, start, end):
 
     # 何を流しているかを明示する。指定した秒数と違えばここで気づける。
     seconds = len(pcm) / DISCORD_BYTES_PER_SECOND
-    await respond(
-        interaction,
-        f"**{start} → {end}** を流します。（{start - end + 1}個の数字 / 全体で約{seconds:.0f}秒）",
-    )
+    await respond(interaction, f"**{start} → {end}** を流します。")
 
     # 異常切断などで after が呼ばれないと、ここで永久に待ち続けてしまう。
     # そうなると voice_client が繋がったままになり、以降ずっと
