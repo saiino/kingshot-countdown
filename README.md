@@ -265,13 +265,17 @@ discord.py が同梱するOpusエンコーダは 48000Hz / 2ch / 3840バイト�
 
 前置きの無音と合図は `bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT` で変える。
 
-## アイコン
+## アイコンとバナー
 
-`assets/icon.png`（1024x1024）。Developer Portal の
-General Information > アプリアイコン からアップロードする。
+Developer Portal の General Information からアップロードする。
 
-作り直すときは `tools/make_icon.py`。Pillow だけ必要で、
-Bot の実行には要らないので `requirements.txt` には入れていない。
+| ファイル | サイズ | 中身 |
+|---|---|---|
+| `assets/icon.png` | 1024x1024 | カウントダウンのリングの中にベル |
+| `assets/banner.png` | 680x240 | 45→0 の音声の波形 |
+
+どちらも Pillow で描いている。Bot の実行には要らないので
+`requirements.txt` には入れていない。
 
 ```bash
 .venv/Scripts/python -m pip install pillow
@@ -281,8 +285,17 @@ Bot の実行には要らないので `requirements.txt` には入れていな�
 .venv/Scripts/python tools/make_icon.py assets/icon.png
 ```
 
-カウントダウンのリングの中にベル。Discordはアイコンを円形に切り抜き、
-メンバー一覧では小さく表示されるので、細部を入れずに太い形で作ってある。
+```bash
+.venv/Scripts/python tools/make_banner.py voice/countdown_45-0_sp3_x1.2.wav assets/banner.png
+```
+
+**アイコン** — Discordは円形に切り抜き、メンバー一覧では40px前後で表示するので、
+細部を入れずに太い形と高いコントラストで作ってある。24pxまで縮めても輪郭が保てる。
+
+**バナー** — 模様は作り物ではなく、実際に生成した 45→0 の音声そのものの波形。
+1秒間隔で46回読み上げているので等間隔のパルス列になる。
+Discordはバナーの左下にアイコンを重ねるため、文字はすべて上側に置いている。
+別の秒数の音声を渡せば、その波形で作り直せる。
 
 ## クレジット
 
