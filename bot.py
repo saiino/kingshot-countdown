@@ -221,6 +221,16 @@ class ShutsujinBell(discord.Client):
 
         asyncio.create_task(self.prebake())
 
+    async def on_guild_join(self, guild):
+        """新しいサーバーに追加されたときも、そこへコマンドを配る。
+
+        on_ready は起動時にしか呼ばれない。これがないと、Botを動かしたまま
+        サーバーに追加しても、再起動するまでコマンドが出てこない。
+        """
+        self.tree.copy_global_to(guild=guild)
+        await self.tree.sync(guild=guild)
+        print(f"参加: {guild.name}（コマンドを配りました）")
+
     async def prebake(self):
         """ボタンぶんの音声を先に焼いておき、押した瞬間に鳴るようにする。"""
         for seconds in PRESETS:
