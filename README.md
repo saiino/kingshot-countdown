@@ -260,6 +260,17 @@ discord.py が同梱するOpusエンコーダは 48000Hz / 2ch / 3840バイト�
 
 前置きの無音と合図は `bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT` で変える。
 
+## クレジット
+
+音声: **VOICEVOX:ずんだもん**
+
+VOICEVOXの音源はクレジット表記が必須（商用・非商用を問わない）。
+話者を変えたときは、その話者名に書き換えること。
+表記の書式と条件は各キャラクターの利用規約に従う。
+
+- [VOICEVOX](https://voicevox.hiroshiba.jp/)
+- [東北ずん子・ずんだもん 音源利用規約](https://zunko.jp/con_ongen_kiyaku.html)
+
 ## 運用メモ
 
 - Phase 1だけでも、画面を見ながらの運用なら実用になる
