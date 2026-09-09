@@ -1,0 +1,9 @@
+# Discord Bot（bot.py）だけが必要とする依存。
+# テキスト版と音声の生成は標準ライブラリのみで動くので、これを入れなくても使える。
+#
+#   python -m venv .venv
+#   .venv/Scripts/python -m pip install -r requirements.txt
+#
+# [voice] を付けると PyNaCl（音声の暗号化）も一緒に入る。
+# OpusエンコーダはdiscordpyがWindows向けDLLを同梱しているので、別途の用意は不要。
+discord.py[voice]>=2.7

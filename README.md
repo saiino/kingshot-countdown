@@ -154,6 +154,78 @@ python voice_countdown.py 45 0 --speaker 3 --speed 1.2 --play
 
 合成部分を偽物に差し替えた単体検証では、配置誤差は0サンプルだった。
 
+## Phase 4：Discord Bot（出陣ベル）
+
+カウントダウンをボイスチャンネルで直接流す。画面共有が要らなくなる。
+
+### 使い方
+
+| コマンド | 用途 |
+|---|---|
+| `/panel` | ボタンを設置する。**一度打てば以降は押すだけ** |
+| `/countdown 開始 終了` | その場で秒数を指定して流す |
+| `/stop` | 再生を止めて退出する |
+
+ボイスチャンネルに入ってから使う。サーバーの誰が押してもよい。
+
+### 準備
+
+```bash
+python -m venv .venv
+```
+
+```bash
+.venv/Scripts/python -m pip install -r requirements.txt
+```
+
+`.env.example` をコピーして `.env` を作り、`DISCORD_TOKEN` を入れる。
+`.env` は `.gitignore` で除外してあるのでコミットされない。
+
+### 起動
+
+```bash
+.venv/Scripts/python bot.py
+```
+
+起動時に、ボタンぶんの音声を先に焼いておくので押した瞬間に鳴る。
+止めるときは Ctrl+C。
+
+### なぜ FFmpeg が要らないか
+
+Discordのボイスは **48kHz・ステレオ・16bit のPCMしか受け取らない**。
+普通は音声ファイルをFFmpegで変換して流すが、`--discord` を付けると
+**VOICEVOXに最初からその形式で出させる**ので変換処理が丸ごと不要になる。
+
+```bash
+python voice_countdown.py 45 0 --discord
+```
+
+Python 3.13で標準ライブラリの `audioop`（音声変換）が削除されているため、
+自前リサンプリングを避けられるのは効いてくる。
+
+discord.py が同梱するOpusエンコーダは 48000Hz / 2ch / 3840バイトフレームを
+要求するが、生成した wav はそのまま割り切れる。
+
+### 画面共有との違い
+
+聞こえるタイミングのばらつき自体は変わらない（どちらもDiscordの音声網を通る）。
+ただし画面共有だと**共有者だけが自分のPCから直接聞くので遅延ゼロ**になり、
+他の人だけが遅れる。Botなら全員が同じ経路になるので、この非対称が消える。
+
+### 設定
+
+`.env` で変えられる。
+
+| キー | 既定 | 意味 |
+|---|---|---|
+| `DISCORD_TOKEN` | （必須） | Botのトークン |
+| `VOICEVOX_SPEAKER` | `3` | 話者ID |
+| `VOICEVOX_SPEED` | `1.2` | 話す速さ |
+| `COUNTDOWN_PRESETS` | `45,60,30` | パネルのボタン（最大5個） |
+| `VOICEVOX_HOST` | `http://127.0.0.1:50021` | VOICEVOXのURL |
+
+前置きの無音と合図は `bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT` で変える。
+
 ## 運用メモ
 
 - Phase 1だけでも、画面を見ながらの運用なら実用になる

@@ -77,13 +77,17 @@ def fetch_speakers(host):
         raise VoicevoxError(f"VOICEVOXに接続できません: {exc.reason}") from exc
 
 
-def synthesize(host, text, speaker, speed):
+def synthesize(host, text, speaker, speed, sample_rate=24000, stereo=False):
     """1つのテキストを合成して wav のバイト列を返す。
 
     VOICEVOX の合成は2段階に分かれている:
       1. /audio_query  … テキストから「読み・抑揚・速度」の設計図(JSON)を作る
       2. /synthesis    … その設計図を渡して実際の音声を作る
     間で設計図をいじれるのがこの分け方の利点。
+
+    sample_rate / stereo を指定できるのは Discord Bot 用。
+    Discordのボイスは48kHz・ステレオ・16bitしか受け取らないので、
+    VOICEVOXに最初からその形式で出させれば変換処理が丸ごと不要になる。
     """
     # 1段階目: パラメータはボディではなくクエリ文字列で渡す
     query_url = f"{host}/audio_query?" + urllib.parse.urlencode(
@@ -96,7 +100,8 @@ def synthesize(host, text, speaker, speed):
     query["speedScale"] = speed
     query["prePhonemeLength"] = 0.0
     query["postPhonemeLength"] = 0.0
-    query["outputStereo"] = False
+    query["outputSamplingRate"] = sample_rate
+    query["outputStereo"] = stereo
 
     # 2段階目: 設計図をJSONボディとして送ると wav が返ってくる
     synthesis_url = f"{host}/synthesis?" + urllib.parse.urlencode({"speaker": speaker})
@@ -170,7 +175,14 @@ def build_countdown_wav(path, args):
         text = READINGS.get(remaining, str(remaining))
         print(f"  合成中: {text}", end="\r", flush=True)
         clip_params, frames = load_clip(
-            synthesize(args.host, text, args.speaker, args.speed)
+            synthesize(
+                args.host,
+                text,
+                args.speaker,
+                args.speed,
+                args.sample_rate,
+                args.stereo,
+            )
         )
         if params is None:
             params = clip_params
@@ -189,7 +201,14 @@ def build_countdown_wav(path, args):
     # 開始の合図。数字の1つ目にぶつからないよう、その直前で鳴り終わるように置く。
     if args.cue:
         cue_params, cue_frames = load_clip(
-            synthesize(args.host, args.cue, args.speaker, args.speed)
+            synthesize(
+                args.host,
+                args.cue,
+                args.speaker,
+                args.speed,
+                args.sample_rate,
+                args.stereo,
+            )
         )
         cue_length = clip_seconds(cue_params, cue_frames)
         if lead < cue_length + 0.3:
@@ -225,6 +244,9 @@ def cache_path(args):
         name += f"_lead{args.lead}"
     if args.cue:
         name += f"_cue{args.cue}"
+    if args.stereo or args.sample_rate != 24000:
+        # 形式が違えば別ファイル。Discord用(48k/stereo)と手元再生用が混ざらない。
+        name += f"_{args.sample_rate}{'st' if args.stereo else 'mo'}"
     return os.path.join(CACHE_DIR, name + ".wav")
 
 
@@ -268,8 +290,18 @@ def parse_args(argv=None):
     parser.add_argument("--play", action="store_true", help="作ったあと再生する")
     parser.add_argument("--force", action="store_true", help="キャッシュを無視して作り直す")
     parser.add_argument("--list-speakers", action="store_true", help="話者一覧を表示して終了")
+    parser.add_argument(
+        "--discord",
+        action="store_true",
+        help="Discordのボイスが要求する48kHz・ステレオで焼く（bot.py用）",
+    )
 
     args = parser.parse_args(argv)
+
+    # Discordのボイスは 48000Hz / 2ch / 16bit しか受け取らない。
+    # ここでその形式にしておけば、再生側で変換する必要がなくなる。
+    args.sample_rate = 48000 if args.discord else 24000
+    args.stereo = bool(args.discord)
 
     if not args.list_speakers:
         if args.start <= args.end:

@@ -1,0 +1,293 @@
+"""出陣ベル — カウントダウンをDiscordのボイスチャンネルで流すBot。
+
+    /countdown 45      … その場で秒数を指定して流す
+    /panel             … よく使う秒数のボタンを設置（普段はこっち）
+    /stop              … 再生を止めて退出
+
+音声は voice_countdown.py が焼いた wav をそのまま流すだけ。
+Discordのボイスは 48kHz・ステレオ・16bit しか受け取らないが、
+VOICEVOXに最初からその形式で出させているので変換処理は要らない。
+
+    .venv\\Scripts\\python bot.py
+"""
+
+import asyncio
+import io
+import os
+import sys
+import wave
+from types import SimpleNamespace
+
+import discord
+from discord import app_commands
+
+import voice_countdown as vc
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# カウント開始前の無音と合図。Botが通話に入るまでの間があるので、
+# いきなり数字が始まらないようにしておく。
+LEAD_SECONDS = 3.0
+CUE_TEXT = "よーい"
+
+
+# ----------------------------------------------------------------- 設定の読み込み
+
+
+def load_env(path):
+    """.env を読む。python-dotenv を入れないための小さな実装。"""
+    values = {}
+    if not os.path.exists(path):
+        return values
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip()
+    return values
+
+
+ENV = load_env(os.path.join(HERE, ".env"))
+
+TOKEN = ENV.get("DISCORD_TOKEN", "")
+SPEAKER = int(ENV.get("VOICEVOX_SPEAKER", 3))
+SPEED = float(ENV.get("VOICEVOX_SPEED", 1.2))
+HOST = ENV.get("VOICEVOX_HOST", vc.DEFAULT_HOST)
+
+# パネルに並べるボタン。Discordは1行に5個までなので5個で打ち止める。
+PRESETS = [
+    int(value)
+    for value in ENV.get("COUNTDOWN_PRESETS", "45,60,30").split(",")
+    if value.strip()
+][:5]
+
+
+# ------------------------------------------------------------------- 音声の用意
+
+
+def countdown_args(start, end):
+    """voice_countdown が期待する引数の束を組み立てる。"""
+    return SimpleNamespace(
+        start=start,
+        end=end,
+        step=1,
+        dense=0,
+        speaker=SPEAKER,
+        speed=SPEED,
+        lead=LEAD_SECONDS,
+        cue=CUE_TEXT,
+        host=HOST,
+        # Discordのボイスが受け取れる唯一の形式
+        sample_rate=48000,
+        stereo=True,
+    )
+
+
+def ensure_wav(start, end):
+    """焼いてあればそのまま、なければ焼いてからパスを返す。
+
+    VOICEVOXへのリクエストは同期的で数十秒かかるので、
+    呼ぶ側は必ず asyncio.to_thread 越しに使うこと。
+    """
+    args = countdown_args(start, end)
+    path = vc.cache_path(args)
+    if not os.path.exists(path):
+        os.makedirs(vc.CACHE_DIR, exist_ok=True)
+        vc.build_countdown_wav(path, args)
+    return path
+
+
+def read_pcm(path):
+    """wavのヘッダを外して、生のPCMバイト列だけを取り出す。
+
+    discord.PCMAudio はヘッダなしの生PCMを読むので、ここで剥がしておく。
+    """
+    with wave.open(path, "rb") as reader:
+        return reader.readframes(reader.getnframes())
+
+
+# --------------------------------------------------------------------- 再生
+
+
+async def respond(interaction, message):
+    """まだ応答していなければ応答、していれば追伸として送る。"""
+    if interaction.response.is_done():
+        await interaction.followup.send(message, ephemeral=True)
+    else:
+        await interaction.response.send_message(message, ephemeral=True)
+
+
+async def play_countdown(interaction, start, end):
+    """呼んだ人のいるボイスチャンネルでカウントダウンを流す。"""
+    voice_state = interaction.user.voice
+    if voice_state is None or voice_state.channel is None:
+        await respond(interaction, "先にボイスチャンネルに入ってください。")
+        return
+
+    channel = voice_state.channel
+    voice_client = interaction.guild.voice_client
+
+    if voice_client is not None and voice_client.is_playing():
+        await respond(interaction, "いま再生中です。止めるなら /stop。")
+        return
+
+    # 音声を焼く場合は数十秒かかる。Discordは3秒以内に応答しないと
+    # タイムアウトするので、先に「考え中」を返して時間を稼ぐ。
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        path = await asyncio.to_thread(ensure_wav, start, end)
+        pcm = await asyncio.to_thread(read_pcm, path)
+    except vc.VoicevoxError as exc:
+        await respond(interaction, f"音声を用意できませんでした。\n{exc}")
+        return
+
+    try:
+        if voice_client is None:
+            voice_client = await channel.connect()
+        elif voice_client.channel != channel:
+            await voice_client.move_to(channel)
+    except discord.ClientException as exc:
+        await respond(interaction, f"ボイスチャンネルに入れませんでした: {exc}")
+        return
+
+    # play() は別スレッドで再生し、終わると after が呼ばれる。
+    # そのままだと待てないので、Eventで再生終了を拾えるようにする。
+    finished = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    voice_client.play(
+        discord.PCMAudio(io.BytesIO(pcm)),
+        after=lambda error: loop.call_soon_threadsafe(finished.set),
+    )
+
+    await respond(interaction, f"{start} → {end} のカウントを流します。")
+
+    await finished.wait()
+    if voice_client.is_connected():
+        await voice_client.disconnect()
+
+
+# --------------------------------------------------------------------- パネル
+
+
+class CountdownButton(discord.ui.Button):
+    def __init__(self, seconds):
+        super().__init__(
+            label=f"{seconds}秒",
+            style=discord.ButtonStyle.primary,
+            # custom_id を固定しておくと、Bot再起動後もボタンが生き続ける
+            custom_id=f"kingshot:countdown:{seconds}",
+        )
+        self.seconds = seconds
+
+    async def callback(self, interaction):
+        await play_countdown(interaction, self.seconds, 0)
+
+
+class CountdownPanel(discord.ui.View):
+    def __init__(self):
+        # timeout=None で、時間が経ってもボタンが死なない
+        super().__init__(timeout=None)
+        for seconds in PRESETS:
+            self.add_item(CountdownButton(seconds))
+
+
+# ------------------------------------------------------------------- Bot本体
+
+
+class ShutsujinBell(discord.Client):
+    def __init__(self):
+        # 特権インテントは使わない。スラッシュコマンドとボタンだけで完結する。
+        super().__init__(intents=discord.Intents.default())
+        self.tree = app_commands.CommandTree(self)
+
+    async def setup_hook(self):
+        # 再起動しても既存のパネルのボタンが反応するように登録し直す
+        self.add_view(CountdownPanel())
+
+    async def on_ready(self):
+        # グローバル同期は反映に最大1時間かかる。参加中のサーバーへ直接
+        # 配ると即座に使えるようになる。
+        for guild in self.guilds:
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+
+        print(f"ログイン: {self.user}")
+        print(f"サーバー: {', '.join(g.name for g in self.guilds) or '(なし)'}")
+        print(f"話者ID {SPEAKER} / 速さ {SPEED} / ボタン {PRESETS}")
+
+        asyncio.create_task(self.prebake())
+
+    async def prebake(self):
+        """ボタンぶんの音声を先に焼いておき、押した瞬間に鳴るようにする。"""
+        for seconds in PRESETS:
+            try:
+                path = await asyncio.to_thread(ensure_wav, seconds, 0)
+                print(f"  用意OK {seconds}秒: {os.path.basename(path)}")
+            except vc.VoicevoxError as exc:
+                print(f"  用意できず {seconds}秒: {exc}")
+                print("  （VOICEVOXを起動すれば、押したときに焼き直します）")
+                return
+
+
+client = ShutsujinBell()
+
+
+@client.tree.command(name="countdown", description="出陣カウントダウンを流します")
+@app_commands.describe(start="開始する残り秒数", end="終了する残り秒数")
+async def countdown_command(interaction: discord.Interaction, start: int = 45, end: int = 0):
+    if start <= end:
+        await respond(interaction, f"開始({start})は終了({end})より大きくしてください。")
+        return
+    if start > 300 or end < 0:
+        await respond(interaction, "0〜300秒の範囲で指定してください。")
+        return
+    await play_countdown(interaction, start, end)
+
+
+@client.tree.command(name="panel", description="カウントダウンのボタンを設置します")
+async def panel_command(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        "**出陣カウントダウン**\nボイスチャンネルに入ってから押してください。",
+        view=CountdownPanel(),
+    )
+
+
+@client.tree.command(name="stop", description="再生を止めて退出します")
+async def stop_command(interaction: discord.Interaction):
+    voice_client = interaction.guild.voice_client
+    if voice_client is None:
+        await respond(interaction, "いま再生していません。")
+        return
+    voice_client.stop()
+    await voice_client.disconnect()
+    await respond(interaction, "止めました。")
+
+
+def main():
+    if not TOKEN:
+        print(
+            ".env の DISCORD_TOKEN が空です。\n"
+            "Discord Developer Portal > Bot > トークンをリセット で発行して、\n"
+            ".env に貼ってください。",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        client.run(TOKEN)
+    except discord.LoginFailure:
+        print(
+            "トークンが拒否されました。.env の DISCORD_TOKEN を確認してください。\n"
+            "（リセットすると古いトークンは無効になります）",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
