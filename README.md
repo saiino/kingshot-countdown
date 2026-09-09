@@ -265,6 +265,25 @@ discord.py が同梱するOpusエンコーダは 48000Hz / 2ch / 3840バイト�
 
 前置きの無音と合図は `bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT` で変える。
 
+## アイコン
+
+`assets/icon.png`（1024x1024）。Developer Portal の
+General Information > アプリアイコン からアップロードする。
+
+作り直すときは `tools/make_icon.py`。Pillow だけ必要で、
+Bot の実行には要らないので `requirements.txt` には入れていない。
+
+```bash
+.venv/Scripts/python -m pip install pillow
+```
+
+```bash
+.venv/Scripts/python tools/make_icon.py assets/icon.png
+```
+
+カウントダウンのリングの中にベル。Discordはアイコンを円形に切り抜き、
+メンバー一覧では小さく表示されるので、細部を入れずに太い形で作ってある。
+
 ## クレジット
 
 音声: **VOICEVOX:ずんだもん**
