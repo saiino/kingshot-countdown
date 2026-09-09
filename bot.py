@@ -30,6 +30,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LEAD_SECONDS = 3.0
 CUE_TEXT = "よーい"
 
+# Discordのボイスが受け取る形式: 48000Hz / 2ch / 16bit
+# 1秒あたりのバイト数。再生時間の見積もりに使う。
+DISCORD_BYTES_PER_SECOND = 48000 * 2 * 2
+
 
 # ----------------------------------------------------------------- 設定の読み込み
 
@@ -177,7 +181,15 @@ async def play_countdown(interaction, start, end):
 
     await respond(interaction, f"{start} → {end} のカウントを流します。")
 
-    await finished.wait()
+    # 異常切断などで after が呼ばれないと、ここで永久に待ち続けてしまう。
+    # そうなると voice_client が繋がったままになり、以降ずっと
+    # 「いま再生中です」と言い続ける詰み状態になる。長さ+30秒で打ち切る。
+    seconds = len(pcm) / DISCORD_BYTES_PER_SECOND
+    try:
+        await asyncio.wait_for(finished.wait(), timeout=seconds + 30)
+    except asyncio.TimeoutError:
+        print(f"再生の終了を検知できませんでした（{start}→{end}）。切断します。")
+
     if voice_client.is_connected():
         await voice_client.disconnect()
 
