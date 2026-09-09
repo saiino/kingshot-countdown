@@ -133,6 +133,17 @@ async def play_countdown(interaction, start, end):
         await respond(interaction, "いま再生中です。止めるなら /stop。")
         return
 
+    # 権限は先に見ておく。ここで弾いておかないと、connect() が例外を投げて
+    # 「考え中」のまま何も返らない状態になり、原因が分からなくなる。
+    permissions = channel.permissions_for(interaction.guild.me)
+    if not permissions.connect or not permissions.speak:
+        await respond(
+            interaction,
+            f"「{channel.name}」で接続または発言の権限がありません。\n"
+            f"チャンネルの権限設定を確認してください。",
+        )
+        return
+
     # 音声を焼く場合は数十秒かかる。Discordは3秒以内に応答しないと
     # タイムアウトするので、先に「考え中」を返して時間を稼ぐ。
     await interaction.response.defer(ephemeral=True)
@@ -149,7 +160,8 @@ async def play_countdown(interaction, start, end):
             voice_client = await channel.connect()
         elif voice_client.channel != channel:
             await voice_client.move_to(channel)
-    except discord.ClientException as exc:
+    except (discord.ClientException, discord.HTTPException, asyncio.TimeoutError) as exc:
+        # 何が起きても必ず返事をする。黙って落ちると「考え中」のまま残る。
         await respond(interaction, f"ボイスチャンネルに入れませんでした: {exc}")
         return
 
@@ -203,12 +215,20 @@ class ShutsujinBell(discord.Client):
         # 特権インテントは使わない。スラッシュコマンドとボタンだけで完結する。
         super().__init__(intents=discord.Intents.default())
         self.tree = app_commands.CommandTree(self)
+        self.ready_once = False
 
     async def setup_hook(self):
         # 再起動しても既存のパネルのボタンが反応するように登録し直す
         self.add_view(CountdownPanel())
 
     async def on_ready(self):
+        # on_ready は起動時だけでなく、再接続のたびに呼ばれる。
+        # 毎回コマンドを配り直すと無駄だし、レート制限にも当たりうる。
+        if self.ready_once:
+            print("再接続しました")
+            return
+        self.ready_once = True
+
         # グローバル同期は反映に最大1時間かかる。参加中のサーバーへ直接
         # 配ると即座に使えるようになる。
         for guild in self.guilds:
