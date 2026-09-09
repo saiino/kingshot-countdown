@@ -266,14 +266,21 @@ class ShutsujinBell(discord.Client):
 client = ShutsujinBell()
 
 
-@client.tree.command(name="countdown", description="出陣カウントダウンを流します")
-@app_commands.describe(start="開始する残り秒数", end="終了する残り秒数")
-async def countdown_command(interaction: discord.Interaction, start: int = 45, end: int = 0):
+@client.tree.command(name="countdown", description="秒数を指定して出陣カウントダウンを流します")
+@app_commands.describe(
+    start="開始する残り秒数（必須。例: 45）",
+    end="終了する残り秒数（省略すると0まで）",
+)
+async def countdown_command(
+    interaction: discord.Interaction,
+    # start をあえて必須にしている。省略可にすると、値を入れずに送信できてしまい、
+    # 「50と打ったのに45が流れる」という気づきにくい事故が起きる。
+    # Range を使うと範囲チェックをDiscord側がやってくれる。
+    start: app_commands.Range[int, 1, 300],
+    end: app_commands.Range[int, 0, 299] = 0,
+):
     if start <= end:
         await respond(interaction, f"開始({start})は終了({end})より大きくしてください。")
-        return
-    if start > 300 or end < 0:
-        await respond(interaction, "0〜300秒の範囲で指定してください。")
         return
     await play_countdown(interaction, start, end)
 
