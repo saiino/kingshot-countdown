@@ -281,6 +281,26 @@ class CommandRegistrationTest(unittest.TestCase):
             self.assertTrue(button.custom_id.startswith("kingshot:countdown:"))
         self.assertIsNone(panel.timeout)
 
+    def test_panel_fits_within_discord_limits(self):
+        """1行5個・最大5行を超えると、送信時に弾かれる。"""
+        rows = bot.CountdownPanel().to_components()
+        self.assertLessEqual(len(rows), 5, "行数が多すぎる")
+        for row in rows:
+            self.assertLessEqual(len(row.get("components", [])), 5, "1行が多すぎる")
+
+    def test_presets_are_capped_not_crashed(self):
+        """設定に多く書かれても、上限で切って落ちないこと。"""
+        with mock.patch.dict(
+            bot.ENV, {"COUNTDOWN_PRESETS": ",".join(str(n) for n in range(1, 40))}
+        ):
+            values = [
+                int(v)
+                for v in bot.ENV["COUNTDOWN_PRESETS"].split(",")
+                if v.strip()
+            ][: bot.MAX_BUTTONS]
+        self.assertEqual(len(values), bot.MAX_BUTTONS)
+        self.assertLessEqual(bot.MAX_BUTTONS, 25)
+
 
 if __name__ == "__main__":
     unittest.main()

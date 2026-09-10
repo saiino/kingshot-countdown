@@ -66,12 +66,15 @@ SPEAKER = int(ENV.get("VOICEVOX_SPEAKER", 3))
 SPEED = float(ENV.get("VOICEVOX_SPEED", 1.2))
 HOST = ENV.get("VOICEVOX_HOST", vc.DEFAULT_HOST)
 
-# パネルに並べるボタン。Discordは1行に5個までなので5個で打ち止める。
+# パネルに並べるボタン。
+# Discordは1行5個・最大5行なので、合計25個まで置ける。
+# 6個以上を渡すと discord.py が自動で次の行へ折り返す。
+MAX_BUTTONS = 25
 PRESETS = [
     int(value)
     for value in ENV.get("COUNTDOWN_PRESETS", "45,60,30").split(",")
     if value.strip()
-][:5]
+][:MAX_BUTTONS]
 
 
 # ------------------------------------------------------------------- 音声の用意

@@ -312,7 +312,7 @@ Administrator 全部は要らないが、この権限は必須。自分のサー
 |---|---|
 | Botを動かす | `start_bot.bat` をダブルクリック。**動かしている間だけ使える** |
 | 新しい秒数を用意する | VOICEVOXを起動して `voice_countdown.py`（`--discord` 付き） |
-| ボタンの秒数を変える | `.env` の `COUNTDOWN_PRESETS` を書き換えてBot再起動（最大5個） |
+| ボタンの秒数を変える | `.env` の `COUNTDOWN_PRESETS` を書き換えてBot再起動。**1行5個・最大25個**で、6個以上は自動で折り返す。増やしたら音声を先に焼いておく |
 | 話者や速さを変える | `.env` の `VOICEVOX_SPEAKER` / `VOICEVOX_SPEED`。**クレジット表記も直す** |
 | 合図や前置きを変える | `bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT`。音声の焼き直しが要る |
 | コマンドの定義を変えた | **Bot再起動が必要。** 再起動しないと古い定義のまま |
@@ -394,7 +394,7 @@ discord.py が同梱するOpusエンコーダは 48000Hz / 2ch / 3840バイト�
 | `DISCORD_TOKEN` | （必須） | Botのトークン |
 | `VOICEVOX_SPEAKER` | `3` | 話者ID |
 | `VOICEVOX_SPEED` | `1.2` | 話す速さ |
-| `COUNTDOWN_PRESETS` | `45,60,30` | パネルのボタン（最大5個） |
+| `COUNTDOWN_PRESETS` | `45,60,30` | パネルのボタン（最大25個） |
 | `VOICEVOX_HOST` | `http://127.0.0.1:50021` | VOICEVOXのURL |
 
 前置きの無音と合図は `bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT` で変える。
