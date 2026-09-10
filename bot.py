@@ -16,6 +16,7 @@ import io
 import os
 import sys
 import wave
+from datetime import datetime
 from types import SimpleNamespace
 
 import discord
@@ -115,6 +116,16 @@ def read_pcm(path):
 # --------------------------------------------------------------------- 再生
 
 
+def log_use(interaction, what):
+    """誰が何を使ったかを窓に出す。
+
+    Discord側の応答は本人にしか見えないので、記録がないと
+    「さっき誰かが押したみたいだけど動いたのか」を後から確かめられない。
+    """
+    where = interaction.guild.name if interaction.guild else "DM"
+    print(f"[{datetime.now():%H:%M:%S}] {interaction.user} — {what}（{where}）")
+
+
 async def respond(interaction, message):
     """まだ応答していなければ応答、していれば追伸として送る。"""
     if interaction.response.is_done():
@@ -125,8 +136,11 @@ async def respond(interaction, message):
 
 async def play_countdown(interaction, start, end):
     """呼んだ人のいるボイスチャンネルでカウントダウンを流す。"""
+    log_use(interaction, f"{start} → {end}")
+
     voice_state = interaction.user.voice
     if voice_state is None or voice_state.channel is None:
+        print("    → ボイスチャンネルに入っていないので中止")
         await respond(interaction, "先にボイスチャンネルに入ってください。")
         return
 
@@ -134,6 +148,7 @@ async def play_countdown(interaction, start, end):
     voice_client = interaction.guild.voice_client
 
     if voice_client is not None and voice_client.is_playing():
+        print("    → すでに再生中なので中止")
         await respond(interaction, "いま再生中です。止めるなら /stop。")
         return
 
@@ -181,6 +196,7 @@ async def play_countdown(interaction, start, end):
 
     # 何を流しているかを明示する。指定した秒数と違えばここで気づける。
     seconds = len(pcm) / DISCORD_BYTES_PER_SECOND
+    print(f"    → 再生開始「{channel.name}」 約{seconds:.0f}秒")
     await respond(interaction, f"**{start} → {end}** を流します。")
 
     # 異常切断などで after が呼ばれないと、ここで永久に待ち続けてしまう。
@@ -193,6 +209,7 @@ async def play_countdown(interaction, start, end):
 
     if voice_client.is_connected():
         await voice_client.disconnect()
+    print("    → 再生終了、退出しました")
 
 
 # --------------------------------------------------------------------- パネル
@@ -242,8 +259,12 @@ class ShutsujinBell(discord.Client):
             return
         self.ready_once = True
 
-        # グローバル同期は反映に最大1時間かかる。参加中のサーバーへ直接
-        # 配ると即座に使えるようになる。
+        # グローバル同期は反映に最大1時間かかるが、Botのプロフィールに出る
+        # コマンド一覧はこちらを見ている。使い勝手のためのサーバー個別同期と
+        # 両方やっておく。同名ならサーバー側が優先されるので二重には出ない。
+        await self.tree.sync()
+
+        # 参加中のサーバーへ直接配ると即座に使えるようになる。
         for guild in self.guilds:
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
@@ -280,6 +301,7 @@ client = ShutsujinBell()
 
 
 @client.tree.command(name="countdown", description="秒数を指定して出陣カウントダウンを流します")
+@app_commands.guild_only()
 @app_commands.describe(
     start="開始する残り秒数（例: 60）",
     end="終了する残り秒数（0まで読むなら 0）",
@@ -300,7 +322,9 @@ async def countdown_command(
 
 
 @client.tree.command(name="panel", description="カウントダウンのボタンを設置します")
+@app_commands.guild_only()
 async def panel_command(interaction: discord.Interaction):
+    log_use(interaction, "パネルを設置")
     await interaction.response.send_message(
         "**出陣カウントダウン**\nボイスチャンネルに入ってから押してください。",
         view=CountdownPanel(),
@@ -308,7 +332,9 @@ async def panel_command(interaction: discord.Interaction):
 
 
 @client.tree.command(name="stop", description="再生を止めて退出します")
+@app_commands.guild_only()
 async def stop_command(interaction: discord.Interaction):
+    log_use(interaction, "停止")
     voice_client = interaction.guild.voice_client
     if voice_client is None:
         await respond(interaction, "いま再生していません。")
