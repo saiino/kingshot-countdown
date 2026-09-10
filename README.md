@@ -361,6 +361,57 @@ discord.py が同梱するOpusエンコーダは 48000Hz / 2ch / 3840バイト�
 
 前置きの無音と合図は `bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT` で変える。
 
+## テスト
+
+```bash
+.venv/Scripts/python -m unittest discover -s tests -t .
+```
+
+58件。全部で1秒かからない。
+
+| ファイル | 見ているもの | モック |
+|---|---|---|
+| `tests/test_countdown.py` | スケジュールとズレ補正 | 時計 |
+| `tests/test_voice_countdown.py` | VOICEVOXへの要求と波形の組み立て | `urlopen` |
+| `tests/test_bot.py` | コマンドの分岐と再生の流れ | interaction / ボイス接続 |
+
+`test_bot.py` だけ discord.py が要る。残り37件は標準ライブラリだけで動く。
+
+```bash
+python -m unittest tests.test_countdown tests.test_voice_countdown
+```
+
+### モックの使いどころ
+
+外部に依存する3つを差し替えている。
+
+- **時計** … 本物を使うと45秒待つうえ、実行環境次第で結果が変わる。
+  偽の時計にすると「7回目で0.4秒もたついた」状況を作れて、
+  補正が効くかを一瞬で、しかも毎回同じ結果で確かめられる
+- **`urllib.request.urlopen`** … VOICEVOXを起動せずに済む。
+  返事を差し替えるだけでなく、**こちらが何を送ったか**も検査する。
+  `prePhonemeLength` を0にし忘れる類の取り違えはここで捕まる
+- **interaction とボイス接続** … Discordに繋がずに分岐だけを通す
+
+### テスト自体の検算
+
+通るテストは書けても、壊れたときに落ちないテストは意味がない。
+わざとバグを入れて、検出できることを確認してある。
+
+| 入れたバグ | 落ちるテスト |
+|---|---|
+| 発声前の無音を消し忘れる | `test_strips_the_silence_around_each_number` |
+| 波形の置き場所を40バイトずらす | `test_every_tick_starts_on_the_second` ほか2件 |
+| ズレ補正をやめて足し算にする | `test_corrected_run_absorbs_a_stumble` |
+| 終了秒を省略可に戻す | `test_both_arguments_are_required` |
+
+最後の2つは実際に運用中に踏んだバグ。
+
+**位置の検証にサイン波を使わないこと。** `sin(0)` は0なので先頭が無音と
+見分けられず、数バイトのずれを見逃す。全サンプルが同じ非ゼロ値の音
+（`make_marker_wav`）なら、始まりと終わりがバイト単位で確定する。
+実際、最初はサイン波で書いていて40バイトのずれを検出できなかった。
+
 ## アイコンとバナー
 
 Developer Portal の General Information からアップロードする。
