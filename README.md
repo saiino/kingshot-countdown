@@ -186,6 +186,44 @@ python -m venv .venv
 `.env.example` をコピーして `.env` を作り、`DISCORD_TOKEN` を入れる。
 `.env` は `.gitignore` で除外してあるのでコミットされない。
 
+#### requirements.txt と requirements.lock
+
+役割が違うので2本ある。**どちらもコミットする。**
+
+| ファイル | 中身 | 誰が書く |
+|---|---|---|
+| `requirements.txt` | **宣言。** 自分で直接選んだものだけ | 人 |
+| `requirements.lock` | **固定。** 依存を全部たどって `==` で止めたもの | pip-compile |
+
+普段は `requirements.txt` を入れれば足りる。バージョンを完全に揃えたい
+（別のPCで同じ状態にしたい、動かなくなった原因を切り分けたい）ときに
+`requirements.lock` を使う。
+
+```bash
+.venv/Scripts/python -m pip install -r requirements.lock
+```
+
+**`pip freeze` の出力をそのまま requirements.txt にしないこと。**
+freeze は「そのPCに入っているもの全部」なので、アイコンを描くための
+Pillow や、ロックを作るための pip-tools まで混ざる。実際この環境では
+freeze が24個、ロックが15個だった。
+
+ロックを作り直すのは、`requirements.txt` を変えたとき。
+
+```bash
+.venv/Scripts/python -m pip install pip-tools
+```
+
+```bash
+.venv/Scripts/python -m piptools compile requirements.txt --output-file requirements.lock
+```
+
+`requirements.lock` は生成物なので手で編集しない。宣言側を直して作り直す。
+
+なお `pip-sync requirements.lock` は環境をロックと完全一致させるが、
+**ロックに無いものをアンインストールする**（Pillowもpip-toolsも消える）。
+使うときは承知の上で。
+
 ### 起動
 
 **`start_bot.bat` をダブルクリック**するのが手軽。コマンドからなら:
