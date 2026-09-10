@@ -13,10 +13,11 @@ VOICEVOXに最初からその形式で出させているので変換処理は要
 
 import asyncio
 import io
+import logging
+import logging.handlers
 import os
 import sys
 import wave
-from datetime import datetime
 from types import SimpleNamespace
 
 import discord
@@ -25,6 +26,10 @@ from discord import app_commands
 import voice_countdown as vc
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+LOG_DIR = os.path.join(HERE, "logs")
+LOG_FILE = os.path.join(LOG_DIR, "bot.log")
+
+log = logging.getLogger("bell")
 
 # カウント開始前の無音と合図。Botが通話に入るまでの間があるので、
 # いきなり数字が始まらないようにしておく。
@@ -113,17 +118,50 @@ def read_pcm(path):
         return reader.readframes(reader.getnframes())
 
 
-# --------------------------------------------------------------------- 再生
+# --------------------------------------------------------------------- 記録
+
+
+def setup_logging():
+    """画面とファイルの両方に記録する。
+
+    discord.py は自前でログ設定をするので、client.run(log_handler=None) と
+    組にして使うこと。そうすると接続や切断のイベントも同じファイルに残り、
+    「あのとき落ちていたのか」を後から追える。
+
+    ファイルは 1MB を超えたら世代交代させ、3世代まで残す。
+    放っておいても際限なく太らない。
+    """
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+    formatter = logging.Formatter(
+        "[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
+    to_file = logging.handlers.RotatingFileHandler(
+        LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+    )
+    to_file.setFormatter(formatter)
+
+    to_screen = logging.StreamHandler()
+    to_screen.setFormatter(formatter)
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(to_file)
+    root.addHandler(to_screen)
 
 
 def log_use(interaction, what):
-    """誰が何を使ったかを窓に出す。
+    """誰が何を使ったかを記録する。
 
     Discord側の応答は本人にしか見えないので、記録がないと
     「さっき誰かが押したみたいだけど動いたのか」を後から確かめられない。
     """
     where = interaction.guild.name if interaction.guild else "DM"
-    print(f"[{datetime.now():%H:%M:%S}] {interaction.user} — {what}（{where}）")
+    log.info(f"{interaction.user} — {what}（{where}）")
+
+
+# --------------------------------------------------------------------- 再生
 
 
 async def respond(interaction, message):
@@ -140,7 +178,7 @@ async def play_countdown(interaction, start, end):
 
     voice_state = interaction.user.voice
     if voice_state is None or voice_state.channel is None:
-        print("    → ボイスチャンネルに入っていないので中止")
+        log.info("    → ボイスチャンネルに入っていないので中止")
         await respond(interaction, "先にボイスチャンネルに入ってください。")
         return
 
@@ -148,7 +186,7 @@ async def play_countdown(interaction, start, end):
     voice_client = interaction.guild.voice_client
 
     if voice_client is not None and voice_client.is_playing():
-        print("    → すでに再生中なので中止")
+        log.info("    → すでに再生中なので中止")
         await respond(interaction, "いま再生中です。止めるなら /stop。")
         return
 
@@ -196,7 +234,7 @@ async def play_countdown(interaction, start, end):
 
     # 何を流しているかを明示する。指定した秒数と違えばここで気づける。
     seconds = len(pcm) / DISCORD_BYTES_PER_SECOND
-    print(f"    → 再生開始「{channel.name}」 約{seconds:.0f}秒")
+    log.info(f"    → 再生開始「{channel.name}」 約{seconds:.0f}秒")
     await respond(interaction, f"**{start} → {end}** を流します。")
 
     # 異常切断などで after が呼ばれないと、ここで永久に待ち続けてしまう。
@@ -205,11 +243,11 @@ async def play_countdown(interaction, start, end):
     try:
         await asyncio.wait_for(finished.wait(), timeout=seconds + 30)
     except asyncio.TimeoutError:
-        print(f"再生の終了を検知できませんでした（{start}→{end}）。切断します。")
+        log.warning(f"再生の終了を検知できませんでした（{start}→{end}）。切断します。")
 
     if voice_client.is_connected():
         await voice_client.disconnect()
-    print("    → 再生終了、退出しました")
+    log.info("    → 再生終了、退出しました")
 
 
 # --------------------------------------------------------------------- パネル
@@ -255,7 +293,7 @@ class ShutsujinBell(discord.Client):
         # on_ready は起動時だけでなく、再接続のたびに呼ばれる。
         # 毎回コマンドを配り直すと無駄だし、レート制限にも当たりうる。
         if self.ready_once:
-            print("再接続しました")
+            log.info("再接続しました")
             return
         self.ready_once = True
 
@@ -269,9 +307,9 @@ class ShutsujinBell(discord.Client):
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
 
-        print(f"ログイン: {self.user}")
-        print(f"サーバー: {', '.join(g.name for g in self.guilds) or '(なし)'}")
-        print(f"話者ID {SPEAKER} / 速さ {SPEED} / ボタン {PRESETS}")
+        log.info(f"ログイン: {self.user}")
+        log.info(f"サーバー: {', '.join(g.name for g in self.guilds) or '(なし)'}")
+        log.info(f"話者ID {SPEAKER} / 速さ {SPEED} / ボタン {PRESETS}")
 
         asyncio.create_task(self.prebake())
 
@@ -283,17 +321,17 @@ class ShutsujinBell(discord.Client):
         """
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
-        print(f"参加: {guild.name}（コマンドを配りました）")
+        log.info(f"参加: {guild.name}（コマンドを配りました）")
 
     async def prebake(self):
         """ボタンぶんの音声を先に焼いておき、押した瞬間に鳴るようにする。"""
         for seconds in PRESETS:
             try:
                 path = await asyncio.to_thread(ensure_wav, seconds, 0)
-                print(f"  用意OK {seconds}秒: {os.path.basename(path)}")
+                log.info(f"  用意OK {seconds}秒: {os.path.basename(path)}")
             except vc.VoicevoxError as exc:
-                print(f"  用意できず {seconds}秒: {exc}")
-                print("  （VOICEVOXを起動すれば、押したときに焼き直します）")
+                log.warning(f"  用意できず {seconds}秒: {exc}")
+                log.warning("  （VOICEVOXを起動すれば、押したときに焼き直します）")
                 return
 
 
@@ -345,24 +383,34 @@ async def stop_command(interaction: discord.Interaction):
 
 
 def main():
+    setup_logging()
+
     if not TOKEN:
-        print(
-            ".env の DISCORD_TOKEN が空です。\n"
-            "Discord Developer Portal > Bot > トークンをリセット で発行して、\n"
-            ".env に貼ってください。",
-            file=sys.stderr,
+        log.error(
+            ".env の DISCORD_TOKEN が空です。"
+            " Discord Developer Portal > Bot > トークンをリセット で発行して、"
+            " .env に貼ってください。"
         )
         return 1
 
+    log.info("=" * 52)
+    log.info(f"起動します（記録: {LOG_FILE}）")
+
     try:
-        client.run(TOKEN)
+        # log_handler=None にすると discord.py が自前のログ設定をしないので、
+        # setup_logging() で用意したファイルと画面の両方に流れる。
+        client.run(TOKEN, log_handler=None)
     except discord.LoginFailure:
-        print(
-            "トークンが拒否されました。.env の DISCORD_TOKEN を確認してください。\n"
-            "（リセットすると古いトークンは無効になります）",
-            file=sys.stderr,
+        log.error(
+            "トークンが拒否されました。.env の DISCORD_TOKEN を確認してください。"
+            "（リセットすると古いトークンは無効になります）"
         )
         return 1
+    finally:
+        # Ctrl+C で止めた場合はここを通る。
+        # ウィンドウの×で閉じるとプロセスごと消えるので記録は残らない。
+        log.info("終了しました")
+
     return 0
 
 
