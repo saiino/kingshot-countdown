@@ -5,7 +5,8 @@ READMEなどから参照するスクリーンショットを置く場所。
 | ファイル名 | 撮るもの |
 |---|---|
 | `01-new-application.png` | Developer Portal でアプリを作る画面 |
-| `02-public-bot-off.png` | Bot タブの「公開Bot」をオフにしたところ |
+| `02-public-bot-off-1.png` | インストールタブで認証リンクを「設定しない」にする |
+| `02-public-bot-off-2.png` | Bot タブで「公開Bot」をオフにする |
 | `03-reset-token.png` | Bot タブの「Reset Token」ボタン周辺 |
 
 ## 撮るときの約束

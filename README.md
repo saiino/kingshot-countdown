@@ -72,7 +72,9 @@ python -m venv .venv
 **先に インストール タブで「デフォルトの認証リンク」を「設定しない」に
 変えておくこと。** 順番が逆だとエラーで弾かれます。
 
-![公開Botをオフ](docs/images/02-public-bot-off.png)
+![インストールタブで認証リンクを設定しないにする](docs/images/02-public-bot-off-1.png)
+
+![Botタブで公開Botをオフにする](docs/images/02-public-bot-off-2.png)
 
 #### 特権インテントは全部オフのまま
 
