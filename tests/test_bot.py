@@ -328,8 +328,36 @@ class CommandRegistrationTest(unittest.TestCase):
         """再起動しても既存のパネルが効き続けるのは、このIDが変わらないから。"""
         panel = bot.CountdownPanel()
         for button in panel.children:
-            self.assertTrue(button.custom_id.startswith("kingshot:countdown:"))
+            self.assertTrue(
+                button.custom_id.startswith("kingshot:"), button.custom_id
+            )
+        countdowns = [
+            b for b in panel.children
+            if b.custom_id.startswith("kingshot:countdown:")
+        ]
+        self.assertEqual(len(countdowns), len(bot.PRESETS))
         self.assertIsNone(panel.timeout)
+
+    def test_stop_button_sits_alone_on_the_last_row(self):
+        """秒数の列に混ざると、慌てているときに押し間違える。"""
+        rows = bot.CountdownPanel().to_components()
+        last = rows[-1]["components"]
+
+        self.assertEqual(len(last), 1, "最下段は停止ボタンだけ")
+        self.assertEqual(last[0]["custom_id"], "kingshot:stop")
+        self.assertEqual(last[0]["style"], discord.ButtonStyle.danger.value, "赤")
+
+        # 秒数のボタンは青のまま
+        for row in rows[:-1]:
+            for component in row["components"]:
+                self.assertEqual(
+                    component["style"], discord.ButtonStyle.primary.value
+                )
+
+    def test_presets_leave_room_for_the_stop_row(self):
+        """上限まで並べても、停止ボタンのぶんの行が残ること。"""
+        self.assertLessEqual(bot.MAX_BUTTONS, 20)
+        self.assertLessEqual((bot.MAX_BUTTONS + 4) // 5, 4)
 
     def test_panel_fits_within_discord_limits(self):
         """1行5個・最大5行を超えると、送信時に弾かれる。"""

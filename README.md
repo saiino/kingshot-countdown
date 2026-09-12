@@ -213,7 +213,7 @@ python -m unittest tests.test_countdown tests.test_voice_countdown
 | `DISCORD_TOKEN` | （必須） | Botのトークン |
 | `VOICEVOX_SPEAKER` | `3` | 話者ID |
 | `VOICEVOX_SPEED` | `1.2` | 話す速さ |
-| `COUNTDOWN_PRESETS` | `45,60,30` | パネルのボタン（最大25個） |
+| `COUNTDOWN_PRESETS` | `45,60,30` | パネルのボタン（最大20個。最下段は停止ボタン） |
 | `VOICEVOX_HOST` | `http://127.0.0.1:50021` | VOICEVOXのURL |
 
 前置きの無音と合図は `bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT` で変えます。

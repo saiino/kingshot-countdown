@@ -71,9 +71,8 @@ SPEED = float(ENV.get("VOICEVOX_SPEED", 1.2))
 HOST = ENV.get("VOICEVOX_HOST", vc.DEFAULT_HOST)
 
 # パネルに並べるボタン。
-# Discordは1行5個・最大5行なので、合計25個まで置ける。
-# 6個以上を渡すと discord.py が自動で次の行へ折り返す。
-MAX_BUTTONS = 25
+# Discordは1行5個・最大5行。最下段を停止ボタンに使うので、秒数は4行ぶんまで。
+MAX_BUTTONS = 20
 PRESETS = [
     int(value)
     for value in ENV.get("COUNTDOWN_PRESETS", "45,60,30").split(",")
@@ -281,16 +280,29 @@ async def play_countdown(interaction, start, end):
     log.info("    → 再生終了、退出しました")
 
 
+async def stop_playback(interaction):
+    """再生を止めて退出する。/stop と停止ボタンの共通処理。"""
+    log_use(interaction, "停止")
+    voice_client = interaction.guild.voice_client
+    if voice_client is None:
+        await respond(interaction, "いま再生していません。")
+        return
+    voice_client.stop()
+    await voice_client.disconnect()
+    await respond(interaction, "止めました。")
+
+
 # --------------------------------------------------------------------- パネル
 
 
 class CountdownButton(discord.ui.Button):
-    def __init__(self, seconds):
+    def __init__(self, seconds, row=None):
         super().__init__(
             label=f"{seconds}秒",
             style=discord.ButtonStyle.primary,
             # custom_id を固定しておくと、Bot再起動後もボタンが生き続ける
             custom_id=f"kingshot:countdown:{seconds}",
+            row=row,
         )
         self.seconds = seconds
 
@@ -298,12 +310,31 @@ class CountdownButton(discord.ui.Button):
         await play_countdown(interaction, self.seconds, 0)
 
 
+class StopButton(discord.ui.Button):
+    def __init__(self, row):
+        super().__init__(
+            label="止める",
+            style=discord.ButtonStyle.danger,
+            custom_id="kingshot:stop",
+            row=row,
+        )
+
+    async def callback(self, interaction):
+        await stop_playback(interaction)
+
+
 class CountdownPanel(discord.ui.View):
     def __init__(self):
         # timeout=None で、時間が経ってもボタンが死なない
         super().__init__(timeout=None)
-        for seconds in PRESETS:
-            self.add_item(CountdownButton(seconds))
+
+        # 行を明示する。自動配置に任せると停止ボタンが秒数の列に混ざり、
+        # 慌てているときに押し間違える。
+        for index, seconds in enumerate(PRESETS):
+            self.add_item(CountdownButton(seconds, row=index // 5))
+
+        # 秒数が使い切った次の行へ。いちばん下に赤で置く
+        self.add_item(StopButton(row=(len(PRESETS) + 4) // 5))
 
 
 # ------------------------------------------------------------------- Bot本体
@@ -403,14 +434,7 @@ async def panel_command(interaction: discord.Interaction):
 @client.tree.command(name="stop", description="再生を止めて退出します")
 @app_commands.guild_only()
 async def stop_command(interaction: discord.Interaction):
-    log_use(interaction, "停止")
-    voice_client = interaction.guild.voice_client
-    if voice_client is None:
-        await respond(interaction, "いま再生していません。")
-        return
-    voice_client.stop()
-    await voice_client.disconnect()
-    await respond(interaction, "止めました。")
+    await stop_playback(interaction)
 
 
 def main():
