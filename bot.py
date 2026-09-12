@@ -14,10 +14,11 @@ VOICEVOXに最初からその形式で出させているので変換処理は要
 import asyncio
 import io
 import logging
-import logging.handlers
 import os
 import sys
+import time
 import wave
+from datetime import datetime
 from types import SimpleNamespace
 
 import discord
@@ -27,7 +28,10 @@ import voice_countdown as vc
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(HERE, "logs")
-LOG_FILE = os.path.join(LOG_DIR, "bot.log")
+
+# ログは起動した日ごとに1本。日付をまたいでも切り替えない。
+# 土19時〜日3時のように夜をまたぐ運用で、1回ぶんが1ファイルに収まる。
+LOG_KEEP_DAYS = 7
 
 log = logging.getLogger("bell")
 
@@ -124,6 +128,29 @@ def read_pcm(path):
 # --------------------------------------------------------------------- 記録
 
 
+def log_path_for_today():
+    return os.path.join(LOG_DIR, f"bot-{datetime.now():%Y-%m-%d}.log")
+
+
+def sweep_old_logs():
+    """保持期間を過ぎたログを消す。
+
+    起動のたびに1回だけ走らせる。動かしっぱなしでも増え続けないのは、
+    1回の起動で1ファイルしか作らないため。
+    """
+    limit = time.time() - LOG_KEEP_DAYS * 86400
+    for name in os.listdir(LOG_DIR):
+        if not (name.startswith("bot-") and name.endswith(".log")):
+            continue
+        path = os.path.join(LOG_DIR, name)
+        try:
+            if os.path.getmtime(path) < limit:
+                os.remove(path)
+                log.info(f"古いログを削除: {name}")
+        except OSError as exc:
+            log.warning(f"古いログを消せませんでした {name}: {exc}")
+
+
 def setup_logging():
     """画面とファイルの両方に記録する。
 
@@ -131,8 +158,9 @@ def setup_logging():
     組にして使うこと。そうすると接続や切断のイベントも同じファイルに残り、
     「あのとき落ちていたのか」を後から追える。
 
-    ファイルは 1MB を超えたら世代交代させ、3世代まで残す。
-    放っておいても際限なく太らない。
+    ファイルは起動した日ごとに分ける（bot-2026-09-12.log）。
+    日付で切り替えないのは、夜をまたぐ運用で1回ぶんが2つに割れると
+    追いにくくなるため。古いものは起動時にまとめて消す。
     """
     os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -140,9 +168,7 @@ def setup_logging():
         "[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
     )
 
-    to_file = logging.handlers.RotatingFileHandler(
-        LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
-    )
+    to_file = logging.FileHandler(log_path_for_today(), encoding="utf-8")
     to_file.setFormatter(formatter)
 
     to_screen = logging.StreamHandler()
@@ -152,6 +178,8 @@ def setup_logging():
     root.setLevel(logging.INFO)
     root.addHandler(to_file)
     root.addHandler(to_screen)
+
+    sweep_old_logs()
 
 
 def log_use(interaction, what):
@@ -397,7 +425,7 @@ def main():
         return 1
 
     log.info("=" * 52)
-    log.info(f"起動します（記録: {LOG_FILE}）")
+    log.info(f"起動します（記録: {log_path_for_today()}）")
 
     try:
         # log_handler=None にすると discord.py が自前のログ設定をしないので、

@@ -268,6 +268,56 @@ class CountdownCommandTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(parameters["end"].required)
 
 
+class LoggingTest(unittest.TestCase):
+    """ログは起動した日ごとに1本、古いものは自動で消す。"""
+
+    def setUp(self):
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.patch = mock.patch.object(bot, "LOG_DIR", self.tmp.name)
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+
+    def make(self, name, days_old):
+        import time
+
+        path = os.path.join(self.tmp.name, name)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("x")
+        stamp = time.time() - days_old * 86400
+        os.utime(path, (stamp, stamp))
+        return path
+
+    def test_file_is_named_after_todays_date(self):
+        from datetime import datetime
+
+        expected = f"bot-{datetime.now():%Y-%m-%d}.log"
+        self.assertEqual(os.path.basename(bot.log_path_for_today()), expected)
+
+    def test_sweep_removes_logs_past_the_keep_window(self):
+        self.make("bot-old.log", bot.LOG_KEEP_DAYS + 1)
+        self.make("bot-recent.log", bot.LOG_KEEP_DAYS - 1)
+
+        bot.sweep_old_logs()
+
+        left = os.listdir(self.tmp.name)
+        self.assertNotIn("bot-old.log", left)
+        self.assertIn("bot-recent.log", left)
+
+    def test_sweep_leaves_unrelated_files_alone(self):
+        """logs/ に置いた他のファイルを巻き添えにしない。"""
+        self.make("メモ.txt", 365)
+        self.make("bot.log", 365)          # 旧方式の名前。bot- で始まらない
+
+        bot.sweep_old_logs()
+
+        left = os.listdir(self.tmp.name)
+        self.assertIn("メモ.txt", left)
+        self.assertIn("bot.log", left)
+
+
 class CommandRegistrationTest(unittest.TestCase):
     def test_all_commands_are_guild_only(self):
         """DMから呼ばれると guild が無く、そのまま落ちる。"""
