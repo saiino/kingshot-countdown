@@ -2,27 +2,37 @@
 
 複数人で同時着弾させるための共通カウントダウン。
 
-> **同盟メンバー向けの使い方は [USAGE.md](USAGE.md) にあります。**
-> このREADMEは作った側の記録です。
-
-
+> - 同盟メンバー向けの使い方 … **[USAGE.md](USAGE.md)**
+> - 実測値や比較の記録 … **[NOTES.md](NOTES.md)**
+>
+> このREADMEには、どういう考えで作ったかと、動かし方・開発の手順を書く。
 
 行軍時間は人によって違う（Aさん30秒、Bさん31秒、Cさん38秒…）ので、
 **全員に同じカウントを流し、各自が自分の秒数のところで出陣する**。
 カウント側は誰が何秒かを知る必要がない。45から0まで正確に読むだけでよい。
 
-Discordの通話に入った状態でこれをPCで動かし、画面共有（音声共有）で全員に届ける。
-Discord botは不要。
+**いまの本命は Phase 4 の Discord Bot。** ボイスチャンネルへ直接流すので、
+画面共有も、誰かが通話に居続けることも要らない。
+
+Phase 1〜3 はそこへ至る段階で、いまも単体で動く。
+テキスト表示だけで済ませたいときや、音声ファイルを作り直すときに使う。
 
 ## ファイル
 
 | ファイル | 中身 |
 |---|---|
+| `bot.py` | **Phase 4。Discord Bot 本体。いまの本命** |
+| `start_bot.bat` | Botの起動用。ダブルクリックで動く |
+| `voice_countdown.py` | Phase 3。VOICEVOXで音声を焼く。Botもこれを呼ぶ |
 | `countdown.py` | Phase 1+2。テキスト表示のカウントダウン |
 | `countdown_argv.py` | 学習用。同じことを `sys.argv` だけで書いた版 |
-| `voice_countdown.py` | Phase 3。VOICEVOXで音声を焼いて再生 |
+| `tests/` | テスト一式 |
+| `tools/` | アイコン・バナーの生成、停止スクリプト |
+| `voice/` | 焼いた音声（生成物。gitには入れない） |
+| `logs/` | 動作の記録（生成物。gitには入れない） |
 
-依存ライブラリなし（標準ライブラリのみ）。Python 3.8以上。
+**`bot.py` 以外は標準ライブラリだけで動く。** Python 3.8以上。
+Botだけが discord.py を要る（[準備](#準備-1)を参照）。
 
 ## Phase 1 / 2：テキスト版
 
@@ -128,36 +138,9 @@ python voice_countdown.py 45 0 --lead 3 --cue よーい --speed 1.2 --play
 
 `pydub` を使えば連結はもっと短く書けるが、`wave` なら外部依存なしで完結する。
 
-### 話者と速さの実測（ずんだもん / speaker 3）
-
-`--speed 1.0` だと、1秒の目盛りに収まらない数字が2つある。
-
-| 数字 | 長さ |
-|---|---|
-| 38（さんじゅうはち） | 1.067s |
-| 31（さんじゅういち） | 1.035s |
-| 41（よんじゅういち） | 0.960s |
-| 最短（ゼロ） | 0.267s |
-
-**`--speed 1.2` にすれば全部1秒未満に収まる。** ずんだもんで使うならこれが既定値でよい。
-
-```bash
-python voice_countdown.py 45 0 --speaker 3 --speed 1.2 --play
-```
-
-他の話者に変えたときは、警告が出るかどうかで判断する。
-
-### 確認できていること
-
-生成した実ファイル（45→0 / speaker 3 / speed 1.2）を解析した結果:
-
-- ファイルの長さ 46.000秒（45秒 + 末尾余白1秒）、24000Hz モノラル
-- 46個の目盛りすべてで、直前10msが完全な無音＝前の数字が食い込んでいない
-- 目盛りから発声の立ち上がりまで 平均41ms / 最大115ms
-  （子音から始まる数字は立ち上がりがわずかに遅い。人間の反応時間より十分小さい）
-- 読みが1秒に収まらない場合は警告が出る（`--speed` を上げる）
-
-合成部分を偽物に差し替えた単体検証では、配置誤差は0サンプルだった。
+ずんだもんは `--speed 1.2` で全数字が1秒の目盛りに収まる。
+他の話者に変えたときは、生成時に警告が出るかどうかで判断する。
+（実測値は [NOTES.md](NOTES.md)）
 
 ## Phase 4：Discord Bot（出陣ベル）
 
@@ -195,34 +178,22 @@ python -m venv .venv
 | `requirements.txt` | **宣言。** 自分で直接選んだものだけ | 人 |
 | `requirements.lock` | **固定。** 依存を全部たどって `==` で止めたもの | pip-compile |
 
-普段は `requirements.txt` を入れれば足りる。バージョンを完全に揃えたい
-（別のPCで同じ状態にしたい、動かなくなった原因を切り分けたい）ときに
+普段は `requirements.txt` を入れれば足りる。バージョンを完全に揃えたいときだけ
 `requirements.lock` を使う。
 
 ```bash
 .venv/Scripts/python -m pip install -r requirements.lock
 ```
 
-**`pip freeze` の出力をそのまま requirements.txt にしないこと。**
-freeze は「そのPCに入っているもの全部」なので、アイコンを描くための
-Pillow や、ロックを作るための pip-tools まで混ざる。実際この環境では
-freeze が24個、ロックが15個だった。
-
-ロックを作り直すのは、`requirements.txt` を変えたとき。
-
-```bash
-.venv/Scripts/python -m pip install pip-tools
-```
+`requirements.txt` を変えたら、ロックを作り直す。
 
 ```bash
 .venv/Scripts/python -m piptools compile requirements.txt --output-file requirements.lock
 ```
 
 `requirements.lock` は生成物なので手で編集しない。宣言側を直して作り直す。
-
-なお `pip-sync requirements.lock` は環境をロックと完全一致させるが、
-**ロックに無いものをアンインストールする**（Pillowもpip-toolsも消える）。
-使うときは承知の上で。
+**`pip freeze` の出力をそのまま requirements.txt にしないこと**
+（理由と実測は [NOTES.md](NOTES.md)）。
 
 ### 起動
 
@@ -376,16 +347,6 @@ VOICEVOXは**焼いていない秒数を使うときの保険**でしかない�
 python voice_countdown.py 50 0 --speaker 3 --speed 1.2 --lead 3 --cue よーい --discord
 ```
 
-### 実機で確認済みの挙動
-
-- ボタンで実際に音が鳴る
-- Botを再起動しても、前に置いたパネルのボタンがそのまま効く
-  （`custom_id` 固定 + `timeout=None`）
-- VOICEVOXを閉じていても、焼き済みの秒数は普通に鳴る
-- 未生成の秒数を指定すると、原因が分かるエラーが返る
-- 未生成の秒数はその場で合成して再生できる（Discordの3秒制限は defer で回避）
-- VCに入らずに押すと案内が出る／再生中の二重起動は弾かれる／`/stop` で止まる
-
 ### 既知の制約
 
 - **1つのサーバー内では同時に1本だけ。** ボイス接続が1つしか張れないため。
@@ -436,7 +397,7 @@ discord.py が同梱するOpusエンコーダは 48000Hz / 2ch / 3840バイト�
 .venv/Scripts/python -m unittest discover -s tests -t .
 ```
 
-58件。全部で1秒かからない。
+60件。全部で1秒かからない。
 
 | ファイル | 見ているもの | モック |
 |---|---|---|
@@ -444,42 +405,11 @@ discord.py が同梱するOpusエンコーダは 48000Hz / 2ch / 3840バイト�
 | `tests/test_voice_countdown.py` | VOICEVOXへの要求と波形の組み立て | `urlopen` |
 | `tests/test_bot.py` | コマンドの分岐と再生の流れ | interaction / ボイス接続 |
 
-`test_bot.py` だけ discord.py が要る。残り37件は標準ライブラリだけで動く。
+`test_bot.py` だけ discord.py が要る。残り39件は標準ライブラリだけで動く。
 
 ```bash
 python -m unittest tests.test_countdown tests.test_voice_countdown
 ```
-
-### モックの使いどころ
-
-外部に依存する3つを差し替えている。
-
-- **時計** … 本物を使うと45秒待つうえ、実行環境次第で結果が変わる。
-  偽の時計にすると「7回目で0.4秒もたついた」状況を作れて、
-  補正が効くかを一瞬で、しかも毎回同じ結果で確かめられる
-- **`urllib.request.urlopen`** … VOICEVOXを起動せずに済む。
-  返事を差し替えるだけでなく、**こちらが何を送ったか**も検査する。
-  `prePhonemeLength` を0にし忘れる類の取り違えはここで捕まる
-- **interaction とボイス接続** … Discordに繋がずに分岐だけを通す
-
-### テスト自体の検算
-
-通るテストは書けても、壊れたときに落ちないテストは意味がない。
-わざとバグを入れて、検出できることを確認してある。
-
-| 入れたバグ | 落ちるテスト |
-|---|---|
-| 発声前の無音を消し忘れる | `test_strips_the_silence_around_each_number` |
-| 波形の置き場所を40バイトずらす | `test_every_tick_starts_on_the_second` ほか2件 |
-| ズレ補正をやめて足し算にする | `test_corrected_run_absorbs_a_stumble` |
-| 終了秒を省略可に戻す | `test_both_arguments_are_required` |
-
-最後の2つは実際に運用中に踏んだバグ。
-
-**位置の検証にサイン波を使わないこと。** `sin(0)` は0なので先頭が無音と
-見分けられず、数バイトのずれを見逃す。全サンプルが同じ非ゼロ値の音
-（`make_marker_wav`）なら、始まりと終わりがバイト単位で確定する。
-実際、最初はサイン波で書いていて40バイトのずれを検出できなかった。
 
 ## Developer Portal の直リンク
 
@@ -534,10 +464,3 @@ VOICEVOXの音源はクレジット表記が必須（商用・非商用を問わ
 
 - [VOICEVOX](https://voicevox.hiroshiba.jp/)
 - [東北ずん子・ずんだもん 音源利用規約](https://zunko.jp/con_ongen_kiyaku.html)
-
-## 運用メモ
-
-- Phase 1だけでも、画面を見ながらの運用なら実用になる
-- Phase 3まで作れば、画面を見ずに耳だけで出陣できる
-- Discord経由だと音が遅れる可能性があるので、本番前に一度
-  相手にどう聞こえるか確認しておくとよい
