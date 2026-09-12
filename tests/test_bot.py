@@ -350,13 +350,26 @@ class StopTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(any("再生していません" in m for m in replies(interaction)))
 
-    async def test_stop_is_recorded(self):
+    async def test_log_says_the_command_was_used(self):
         interaction = make_interaction(playing=True)
 
         with self.assertLogs("bell", level="INFO") as captured:
             await bot.stop_command.callback(interaction)
 
-        self.assertIn("停止", chr(10).join(captured.output))
+        self.assertIn("停止（コマンド）", chr(10).join(captured.output))
+
+    async def test_log_says_the_button_was_used(self):
+        """赤いボタンが使われているかを、ログから判別できるようにした。"""
+        interaction = make_interaction(playing=True)
+        button = next(
+            b for b in bot.CountdownPanel().children
+            if b.custom_id == "kingshot:stop"
+        )
+
+        with self.assertLogs("bell", level="INFO") as captured:
+            await button.callback(interaction)
+
+        self.assertIn("停止（ボタン）", chr(10).join(captured.output))
 
 
 class CommandRegistrationTest(unittest.TestCase):

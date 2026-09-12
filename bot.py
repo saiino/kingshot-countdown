@@ -280,9 +280,13 @@ async def play_countdown(interaction, start, end):
     log.info("    → 再生終了、退出しました")
 
 
-async def stop_playback(interaction):
-    """再生を止めて退出する。/stop と停止ボタンの共通処理。"""
-    log_use(interaction, "停止")
+async def stop_playback(interaction, how):
+    """再生を止めて退出する。/stop と停止ボタンの共通処理。
+
+    how には呼び出し元を渡す。ログを見たときに、赤いボタンが使われたのか
+    コマンドが打たれたのかを区別できるようにするため。
+    """
+    log_use(interaction, f"停止（{how}）")
     voice_client = interaction.guild.voice_client
     if voice_client is None:
         await respond(interaction, "いま再生していません。")
@@ -320,7 +324,7 @@ class StopButton(discord.ui.Button):
         )
 
     async def callback(self, interaction):
-        await stop_playback(interaction)
+        await stop_playback(interaction, "ボタン")
 
 
 class CountdownPanel(discord.ui.View):
@@ -434,7 +438,7 @@ async def panel_command(interaction: discord.Interaction):
 @client.tree.command(name="stop", description="再生を止めて退出します")
 @app_commands.guild_only()
 async def stop_command(interaction: discord.Interaction):
-    await stop_playback(interaction)
+    await stop_playback(interaction, "コマンド")
 
 
 def main():
