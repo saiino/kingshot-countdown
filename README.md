@@ -34,16 +34,6 @@ Discordのボイスチャンネルに残り秒数を読み上げるBotです。
 
 ```bash
 python -m venv .venv
-```
-
-```bash
-.venv/Scripts/python -m pip install -r requirements.txt
-```
-
-`requirements.txt` は**自分で直接選んだものだけ**を書いた宣言です。
-バージョンまで完全に揃えたいときは `requirements.lock` を使います。
-
-```bash
 .venv/Scripts/python -m pip install -r requirements.lock
 ```
 
@@ -66,16 +56,55 @@ python -m venv .venv
 
 ### 3. Discord Bot のトークン
 
-[Developer Portal](https://discord.com/developers/applications) でアプリを作り、
-Botのトークンを発行します。権限は **Connect** と **Speak** の2つだけ。
+#### アプリを作る
 
-`.env.example` をコピーして `.env` を作り、トークンを入れます。
+[Developer Portal](https://discord.com/developers/applications) を開き、
+右上の **New Application** からアプリを作ります。
+テンプレートを聞かれたら **サーバーまたはコミュニティのBotを作成** を選びます。
+
+![アプリを作る](docs/images/01-new-application.png)
+
+#### 公開Botをオフにする
+
+左メニューの **Bot** を開き、**公開Bot（Public Bot）** をオフにします。
+自分だけがこのBotをサーバーへ追加できる状態になります。
+
+**先に インストール タブで「デフォルトの認証リンク」を「設定しない」に
+変えておくこと。** 順番が逆だとエラーで弾かれます。
+
+![公開Botをオフ](docs/images/02-public-bot-off.png)
+
+#### 特権インテントは全部オフのまま
+
+同じ画面の **Privileged Gateway Intents** は3つとも触りません。
+スラッシュコマンドとボタンだけで動くので不要です。
+オフのままにしておくと、メッセージもメンバー情報も読めないBotになります。
+
+#### トークンを発行する
+
+**Reset Token** を押します。多要素認証を求められたら通してください。
+
+**トークンは一度しか表示されません。** すぐコピーします。
+失くしてもリセットすれば作り直せます（古いトークンは無効になります）。
+
+![トークンを発行](docs/images/03-reset-token.png)
+
+#### .env に貼る
 
 ```bash
 cp .env.example .env
 ```
 
+`DISCORD_TOKEN=` の右に貼ります。クォートで囲まず、前後に空白も入れません。
+
+```
+DISCORD_TOKEN=MTIzNDU2Nzg5...
+```
+
 `.env` は `.gitignore` で除外してあるのでコミットされません。
+
+> **トークンを含むスクリーンショットは絶対に置かないこと。**
+> このリポジトリは公開なので、画像に写った文字列も読まれます。
 
 > サーバーへの招待手順は [OPERATIONS.md](OPERATIONS.md) にあります。
 
