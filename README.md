@@ -304,6 +304,37 @@ Administrator 全部は要らないが、この権限は必須。自分のサー
 に変えてから、Bot タブで公開BotをOFFにする。順番が逆だと弾かれる。
 デフォルトの認証リンクを消したぶん、招待URLは上の OAuth2 URL Generator で作る。
 
+### 毎週の自動起動（タスクスケジューラ）
+
+Windowsのタスクスケジューラに3つ登録してある。手で起動しなくても、
+**土曜19時に立ち上がって、日曜3時に落ちる。**
+
+| タスク | いつ | 何を |
+|---|---|---|
+| `\出陣ベル\1-Bot起動` | 土 19:00 | `start_bot.bat` |
+| `\出陣ベル\2-VOICEVOX起動` | 土 19:00 | VOICEVOX本体 |
+| `\出陣ベル\3-停止` | 日 03:00 | `tools/stop_bot.ps1` で両方を止める |
+
+**スリープからの復帰を有効にしてある**ので、放置してスリープに入っていても
+時刻になれば起きて動く。ただし**電源が切れていると動かない**。
+
+時刻を変えたり止めたりするのは、タスクスケジューラのGUI（`taskschd.msc` →
+タスク スケジューラ ライブラリ → 出陣ベル）か、PowerShellから。
+
+```powershell
+Get-ScheduledTask -TaskPath "\出陣ベル\" | Get-ScheduledTaskInfo
+```
+
+```powershell
+Unregister-ScheduledTask -TaskPath "\出陣ベル\" -TaskName "2-VOICEVOX起動" -Confirm:$false
+```
+
+VOICEVOXは**焼いていない秒数を使うときの保険**でしかない。不要なら
+上のコマンドでそのタスクだけ消してよい。
+
+停止は強制終了なので `bot.py` の `finally` は通らない。代わりに
+`stop_bot.ps1` がログへ「スケジュールにより停止します」と書き足す。
+
 ### 運用の覚え書き
 
 忘れやすいことをまとめておく。
