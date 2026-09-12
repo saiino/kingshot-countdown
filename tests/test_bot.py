@@ -318,6 +318,47 @@ class LoggingTest(unittest.TestCase):
         self.assertIn("bot.log", left)
 
 
+class StopTest(unittest.IsolatedAsyncioTestCase):
+    """/stop と赤いボタンは同じ処理を通る。"""
+
+    async def test_button_stops_and_disconnects(self):
+        interaction = make_interaction(playing=True)
+        button = next(
+            b for b in bot.CountdownPanel().children
+            if b.custom_id == "kingshot:stop"
+        )
+
+        await button.callback(interaction)
+
+        interaction._voice_client.stop.assert_called_once()
+        interaction._voice_client.disconnect.assert_awaited_once()
+        self.assertTrue(any("止めました" in m for m in replies(interaction)))
+
+    async def test_command_stops_and_disconnects(self):
+        interaction = make_interaction(playing=True)
+
+        await bot.stop_command.callback(interaction)
+
+        interaction._voice_client.stop.assert_called_once()
+        interaction._voice_client.disconnect.assert_awaited_once()
+
+    async def test_says_so_when_nothing_is_playing(self):
+        interaction = make_interaction()
+        interaction.guild.voice_client = None
+
+        await bot.stop_command.callback(interaction)
+
+        self.assertTrue(any("再生していません" in m for m in replies(interaction)))
+
+    async def test_stop_is_recorded(self):
+        interaction = make_interaction(playing=True)
+
+        with self.assertLogs("bell", level="INFO") as captured:
+            await bot.stop_command.callback(interaction)
+
+        self.assertIn("停止", chr(10).join(captured.output))
+
+
 class CommandRegistrationTest(unittest.TestCase):
     def test_all_commands_are_guild_only(self):
         """DMから呼ばれると guild が無く、そのまま落ちる。"""

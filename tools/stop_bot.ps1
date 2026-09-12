@@ -6,9 +6,25 @@
 # 「なぜ止まったか」が後から分かるよう、ここでログに1行足しておく。
 
 $root = Split-Path -Parent $PSScriptRoot
-$log = Join-Path $root "logs\bot.log"
+
+# ログは起動した日ごとに1本（bot-YYYY-MM-DD.log）。
+# 土19時起動 → 日3時停止のように日付をまたぐので、「今日の日付」で
+# 組み立てると外れる。いま開かれているもの＝いちばん新しいものを狙う。
+$log = Get-ChildItem (Join-Path $root "logs") -Filter "bot-*.log" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1 -ExpandProperty FullName
+
+# 日付別にする前の版が動いている間は bot.log に書かれている
+if (-not $log) {
+    $legacy = Join-Path $root "logs\bot.log"
+    if (Test-Path $legacy) { $log = $legacy }
+}
 
 function Write-Log($message) {
+    if (-not $log) {
+        Write-Host "ログファイルが見つかりませんでした"
+        return
+    }
     # Botがログファイルを開いたままなので、書けないこともある。失敗しても進む。
     try {
         $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
