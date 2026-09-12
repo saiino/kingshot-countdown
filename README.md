@@ -450,6 +450,17 @@ python -m unittest tests.test_countdown tests.test_voice_countdown
 （`make_marker_wav`）なら、始まりと終わりがバイト単位で確定する。
 実際、最初はサイン波で書いていて40バイトのずれを検出できなかった。
 
+## Developer Portal の直リンク
+
+アプリID `1547220441662496828`。毎回一覧から探すのが面倒なので控えておく。
+
+| 用途 | URL |
+|---|---|
+| アイコン・バナー・概要 | https://discord.com/developers/applications/1547220441662496828/information |
+| トークン・公開Bot設定 | https://discord.com/developers/applications/1547220441662496828/bot |
+| 招待リンク作成 | https://discord.com/developers/applications/1547220441662496828/oauth2 |
+| インストール設定 | https://discord.com/developers/applications/1547220441662496828/installation |
+
 ## アイコンとバナー
 
 Developer Portal の General Information からアップロードする。
