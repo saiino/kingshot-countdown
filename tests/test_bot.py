@@ -930,7 +930,7 @@ class GoodbyeTest(AnnounceTestBase):
         self.assertEqual(len(self.channel.edited), 1)
         message_id, content, view = self.channel.edited[0]
         self.assertEqual(message_id, 555)
-        self.assertIn("停止しました", content)
+        self.assertIn("おやすみ中", content)
         self.assertIsNone(view, "ボタンを外す")
 
     async def test_keeps_the_record_so_the_next_start_can_replace_it(self):
@@ -952,9 +952,16 @@ class GoodbyeTest(AnnounceTestBase):
     def test_goodbye_says_when_it_stopped(self):
         from datetime import datetime
 
-        text = bot.goodbye_text(datetime(2026, 9, 20, 3, 0))
-        self.assertIn("停止しました", text)
-        self.assertIn("09/20 03:00", text)
+        when = datetime(2026, 9, 20, 3, 0)
+        text = bot.goodbye_text(when)
+        self.assertIn("おやすみ中", text)
+        # 見る人の端末の時刻で出るよう、Discordのタイムスタンプ記法で書く
+        self.assertIn(f"<t:{int(when.timestamp())}:f>", text)
+
+    def test_time_line_is_small_print(self):
+        """時刻の行は補足なので、Discordの小さい文字（-#）にする。"""
+        lines = bot.goodbye_text().splitlines()
+        self.assertTrue(lines[-1].startswith("-# "), lines[-1])
 
 
 class CloseTest(AnnounceTestBase):

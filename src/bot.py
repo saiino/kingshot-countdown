@@ -5,7 +5,7 @@
     /stop              … 再生を止めて退出
 
 起動したら .env の PANEL_CHANNEL_IDS のチャンネルにパネルを貼り、
-止まるときにそのパネルを「停止しました」へ書き換える。
+止まるときにそのパネルを「おやすみ中」へ書き換える。
 
 音声は voice_countdown.py が焼いた wav をそのまま流すだけ。
 Discordのボイスは 48kHz・ステレオ・16bit しか受け取らないが、
@@ -527,12 +527,21 @@ def parse_channel_ids(text):
     return ids
 
 
+STARTUP_NOTE = "🔔 出陣ベル、起動しました！"
+
+
 def goodbye_text(now=None):
+    """止まったときにパネルを書き換える文言。
+
+    時刻は Discord のタイムスタンプ記法（<t:秒:f>）で書く。見る人の端末の
+    時刻と言語で表示されるので、こちらでタイムゾーンを気にしなくてよい。
+    -# で始まる行は、Discordでは小さい灰色の補足になる。
+    """
     now = now or datetime.now()
     return (
         "**出陣カウントダウン**\n"
-        "出陣ベルは停止しました。またね！\n"
-        f"（{now:%m/%d %H:%M} に停止。次に起動すると、ここに新しいパネルが出ます）"
+        "💤 出陣ベルはおやすみ中です。バイバイ〜👋\n"
+        f"-# <t:{int(now.timestamp())}:f> に停止 ・ 次に起動すると、ここに新しいパネルが出ます"
     )
 
 
@@ -642,7 +651,7 @@ class ShutsujinBell(discord.Client):
             end, _ = end_setting_for(channel.guild.id)
             try:
                 message = await channel.send(
-                    panel_text(channel.guild.id, note="出陣ベルが起動しました。"),
+                    panel_text(channel.guild.id, note=STARTUP_NOTE),
                     view=CountdownPanel(current=end),
                 )
             except discord.HTTPException as exc:
@@ -705,7 +714,7 @@ class ShutsujinBell(discord.Client):
             await asyncio.sleep(STOP_POLL_SECONDS)
 
     async def say_goodbye(self):
-        """起動時に貼ったパネルを「停止しました」に書き換えて、ボタンを外す。
+        """起動時に貼ったパネルを「おやすみ中」に書き換えて、ボタンを外す。
 
         停止中に古いボタンが押されて「応答しませんでした」になるのを防ぐ。
         メッセージは消さずに残し、次の起動で消して貼り直す。
