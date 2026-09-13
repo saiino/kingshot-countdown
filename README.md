@@ -174,7 +174,7 @@ python src/countdown.py 60 30
 .venv/Scripts/python -m unittest discover -s tests -t .
 ```
 
-120件ほど（2026-09-13時点の参考値。機能を足すたびに増える）。数秒で終わります。
+130件ほど（2026-09-13時点の参考値。機能を足すたびに増える）。数秒で終わります。
 
 | ファイル | 見ているもの | モック |
 |---|---|---|
@@ -220,7 +220,10 @@ python -m unittest tests.test_countdown tests.test_voice_countdown
 | `VOICEVOX_SPEAKER` | `3` | 話者ID |
 | `VOICEVOX_SPEED` | `1.2` | 話す速さ |
 | `COUNTDOWN_PRESETS` | `45,60,30` | パネルのボタン（最大15個。一番上は選択欄、最下段は停止ボタン） |
-| `PANEL_CHANNEL_IDS` | （空） | 起動時にパネルを貼るチャンネルのID。カンマ区切り。空なら貼らない |
+| `PANEL_CHANNEL_IDS` | （空） | 毎週、起動時にパネルを貼るチャンネルのID。カンマ区切り |
+| `PANEL_CHANNELS_SERVER_WAR` | （空） | 鯖戦の週だけパネルを貼るチャンネルのID |
+| `PANEL_CHANNELS_DOMESTIC` | （空） | 国内戦の週だけパネルを貼るチャンネルのID |
+| `BATTLE_ANCHOR_DATE` | `2026-09-12` | 鯖戦だった土曜日。ここから2週おきに鯖戦・国内戦を判定する |
 | `VOICEVOX_HOST` | `http://127.0.0.1:50021` | VOICEVOXのURL |
 
 前置きの無音と合図は `src/bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT` で変えます。

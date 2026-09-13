@@ -815,6 +815,12 @@ class AnnounceTestBase(unittest.IsolatedAsyncioTestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
+        # 手元の .env に書いた本物のチャンネルIDや基準日に左右されないようにする
+        for name in ("BATTLE_ANCHOR_DATE", "PANEL_CHANNELS_SERVER_WAR", "PANEL_CHANNELS_DOMESTIC"):
+            patcher = mock.patch.object(bot, name, "")
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
         self.bell = bot.ShutsujinBell()
         self.channel = FakeChannel()
         self.bell.get_channel = lambda cid: self.channel if cid == self.channel.id else None
@@ -867,6 +873,45 @@ class StartupPanelTest(AnnounceTestBase):
         self.assertEqual(self.channel.deleted, [555])
         self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {"123": 901})
 
+    async def test_clears_last_weeks_panel_from_a_channel_not_used_this_week(self):
+        """鯖戦の週に493へ貼ったものが、次の週に残り続けないこと。"""
+        last_week = FakeChannel(channel_id=777, guild_id=493)
+        self.bell.get_channel = {123: self.channel, 777: last_week}.get
+        bot.write_json(bot.ANNOUNCED_PATH, {"777": 555})
+        self.channels("123")
+
+        await self.bell.post_startup_panels()
+
+        self.assertEqual(last_week.deleted, [555])
+        self.assertEqual(last_week.sent, [])
+        self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {"123": 901})
+
+    async def test_old_records_are_cleared_even_when_nothing_is_posted(self):
+        bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
+        self.channels("")
+
+        await self.bell.post_startup_panels()
+
+        self.assertEqual(self.channel.deleted, [555])
+        self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {})
+
+    async def test_posts_to_the_battle_channel_on_a_battle_week(self):
+        from datetime import date
+
+        war = FakeChannel(channel_id=222, guild_id=493)
+        self.bell.get_channel = {123: self.channel, 222: war}.get
+        self.channels("123")
+
+        with mock.patch.object(bot, "BATTLE_ANCHOR_DATE", "2026-09-12"), \
+                mock.patch.object(bot, "PANEL_CHANNELS_SERVER_WAR", "222"):
+            with self.assertLogs("bell", level="INFO") as captured:
+                await self.bell.post_startup_panels(today=date(2026, 10, 10))
+
+        self.assertEqual(len(war.sent), 1)
+        self.assertEqual(len(self.channel.sent), 1, "毎週のチャンネルにも貼る")
+        self.assertIn("今週（10/10）は鯖戦", "\n".join(captured.output))
+        self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {"123": 901, "222": 901})
+
     async def test_old_panel_deleted_by_hand_is_fine(self):
         bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
         self.channel.missing.add(555)
@@ -905,6 +950,69 @@ class StartupPanelTest(AnnounceTestBase):
             await self.bell.post_startup_panels()
 
         self.assertFalse(os.path.exists(bot.ANNOUNCED_PATH) and bot.read_json(bot.ANNOUNCED_PATH))
+
+
+class BattleWeekTest(unittest.TestCase):
+    """鯖戦と国内戦は、それぞれ4週ごとに2週ずらして交互に来る。"""
+
+    ANCHOR = "2026-09-12"
+
+    def kind(self, year, month, day, anchor=None):
+        from datetime import date
+
+        return bot.battle_kind(date(year, month, day), self.ANCHOR if anchor is None else anchor)
+
+    def test_alternates_every_two_weeks(self):
+        self.assertEqual(self.kind(2026, 9, 12), "鯖戦")
+        self.assertIsNone(self.kind(2026, 9, 19))
+        self.assertEqual(self.kind(2026, 9, 26), "国内戦")
+        self.assertIsNone(self.kind(2026, 10, 3))
+        self.assertEqual(self.kind(2026, 10, 10), "鯖戦")
+        self.assertEqual(self.kind(2026, 10, 24), "国内戦")
+
+    def test_sunday_night_counts_as_the_saturday_before(self):
+        """土19時〜日3時の運用なので、日曜の深夜に再起動しても切り替わらない。"""
+        self.assertEqual(self.kind(2026, 9, 13), "鯖戦")
+        self.assertEqual(self.kind(2026, 9, 27), "国内戦")
+
+    def test_keeps_counting_far_ahead_and_behind(self):
+        self.assertEqual(self.kind(2027, 9, 11), "鯖戦")   # 52週後
+        self.assertEqual(self.kind(2026, 8, 29), "国内戦")  # 2週前
+
+    def test_empty_anchor_means_no_battle_weeks(self):
+        self.assertIsNone(self.kind(2026, 9, 12, anchor=""))
+
+    def test_unreadable_anchor_is_reported(self):
+        with self.assertLogs("bell", level="WARNING") as captured:
+            self.assertIsNone(self.kind(2026, 9, 12, anchor="9/12"))
+        self.assertIn("9/12", "\n".join(captured.output))
+
+
+class ChannelsForWeekTest(unittest.TestCase):
+    def setUp(self):
+        for name, value in (
+            ("BATTLE_ANCHOR_DATE", "2026-09-12"),
+            ("PANEL_CHANNEL_IDS", "1"),
+            ("PANEL_CHANNELS_SERVER_WAR", "2, 3"),
+            ("PANEL_CHANNELS_DOMESTIC", "4,1"),
+        ):
+            patcher = mock.patch.object(bot, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def ids(self, month, day):
+        from datetime import date
+
+        return bot.channel_ids_for_week(date(2026, month, day))
+
+    def test_server_war_week_adds_the_server_war_channels(self):
+        self.assertEqual(self.ids(9, 12), ("鯖戦", [1, 2, 3]))
+
+    def test_domestic_week_adds_the_domestic_channels_without_duplicates(self):
+        self.assertEqual(self.ids(9, 26), ("国内戦", [1, 4]))
+
+    def test_week_without_a_battle_uses_only_the_every_week_channels(self):
+        self.assertEqual(self.ids(9, 19), (None, [1]))
 
 
 class ParseChannelIdsTest(unittest.TestCase):

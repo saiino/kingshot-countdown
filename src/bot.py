@@ -22,7 +22,7 @@ import os
 import sys
 import time
 import wave
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import discord
@@ -98,8 +98,17 @@ END_CHOICES = list(range(0, 55, 5))
 SETTINGS_PATH = os.path.join(ROOT, "panel_settings.json")
 
 # 起動したときにパネルを貼るチャンネル（カンマ区切りのID）。空なら貼らない。
-# ゲーム用のサーバーに毎回貼ると通知がうるさいので、今はテストサーバーだけにしている。
+#   PANEL_CHANNEL_IDS         … 毎週（戦闘がない週も）。今はノリーのテストサーバー
+#   PANEL_CHANNELS_SERVER_WAR … 鯖戦の週だけ（サーバー共通の 493のサーバー）
+#   PANEL_CHANNELS_DOMESTIC   … 国内戦の週だけ（同盟の 【JYP】自由の誉火）
+# ゲーム用のサーバーに毎週貼ると通知がうるさいので、戦闘がある週だけにしている。
 PANEL_CHANNEL_IDS = ENV.get("PANEL_CHANNEL_IDS", "")
+PANEL_CHANNELS_SERVER_WAR = ENV.get("PANEL_CHANNELS_SERVER_WAR", "")
+PANEL_CHANNELS_DOMESTIC = ENV.get("PANEL_CHANNELS_DOMESTIC", "")
+
+# 鯖戦だった土曜日。鯖戦と国内戦はそれぞれ4週ごとで、2週ずらして交互に来るので、
+# ここから数えて今週がどちらかを判定する（9/12 鯖戦 → 9/26 国内戦 → 10/10 鯖戦）。
+BATTLE_ANCHOR_DATE = ENV.get("BATTLE_ANCHOR_DATE", "2026-09-12")
 
 # 起動時に貼ったパネルのメッセージID。次の起動で消す・止まるときに書き換えるのに使う。
 ANNOUNCED_PATH = os.path.join(ROOT, "announced_panels.json")
@@ -531,6 +540,42 @@ def parse_channel_ids(text):
     return ids
 
 
+def saturday_of(day):
+    """その日が属する週の土曜日。
+
+    運用は土19時〜日3時なので、日曜の深夜に再起動しても前日の土曜として扱う。
+    """
+    return day - timedelta(days=(day.weekday() - 5) % 7)
+
+
+def battle_kind(day, anchor_text):
+    """その週が「鯖戦」「国内戦」「戦闘なし（None）」のどれかを返す。
+
+    鯖戦と国内戦はそれぞれ4週ごとで、2週ずらして交互に来る。
+    基準の鯖戦の土曜日から数えて、28日で割った余りが0なら鯖戦、14なら国内戦。
+    """
+    if not anchor_text.strip():
+        return None
+    try:
+        anchor = datetime.strptime(anchor_text.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        log.warning(f"BATTLE_ANCHOR_DATE「{anchor_text}」は日付として読めません（例: 2026-09-12）")
+        return None
+    offset = (saturday_of(day) - saturday_of(anchor)).days % 28
+    return {0: "鯖戦", 14: "国内戦"}.get(offset)
+
+
+def channel_ids_for_week(day):
+    """(その週の種類, 貼るチャンネルID) を返す。毎週ぶんに、戦闘がある週のぶんを足す。"""
+    kind = battle_kind(day, BATTLE_ANCHOR_DATE)
+    extra = {"鯖戦": PANEL_CHANNELS_SERVER_WAR, "国内戦": PANEL_CHANNELS_DOMESTIC}.get(kind, "")
+    ids = []
+    for channel_id in parse_channel_ids(PANEL_CHANNEL_IDS) + parse_channel_ids(extra):
+        if channel_id not in ids:
+            ids.append(channel_id)
+    return kind, ids
+
+
 STARTUP_NOTE = "🔔 出陣ベル、起動しました！"
 
 
@@ -631,26 +676,35 @@ class ShutsujinBell(discord.Client):
 
     # ------------------------------------------------------ 起動時のパネル
 
-    async def post_startup_panels(self):
-        """.env の PANEL_CHANNEL_IDS のチャンネルにパネルを貼る。
+    async def post_startup_panels(self, today=None):
+        """その週に貼るべきチャンネルにパネルを貼る。
 
-        前回の起動で貼ったものは消してから貼る。残すと毎週1枚ずつ溜まっていくし、
+        前回の起動で貼ったものは、今回も同じ場所に貼るかどうかに関係なく全部消す。
+        週によって貼る場所が変わるので、今回のリストだけを見て消すと、
+        先週の場所に「おやすみ中」のパネルが残り続けてしまう。
         新しく貼れば一番下に出るので、チャットが流れていても見つけやすい。
         """
-        channel_ids = parse_channel_ids(PANEL_CHANNEL_IDS)
-        if not channel_ids:
-            return
+        today = today or date.today()
+        kind, channel_ids = channel_ids_for_week(today)
+        if BATTLE_ANCHOR_DATE.strip():
+            log.info(f"今週（{saturday_of(today):%m/%d}）は{kind or '戦闘なし'}")
 
         posted = read_json(ANNOUNCED_PATH)
+        if not channel_ids and not posted:
+            return
+
+        for key, old_id in posted.items():
+            if not str(key).isdigit():
+                continue
+            channel = await self.find_channel(int(key))
+            if channel is not None:
+                await self.delete_quietly(channel, old_id)
+
+        fresh = {}
         for channel_id in channel_ids:
-            key = str(channel_id)
             channel = await self.find_channel(channel_id)
             if channel is None:
                 continue
-
-            old_id = posted.pop(key, None)
-            if old_id is not None:
-                await self.delete_quietly(channel, old_id)
 
             end, _ = end_setting_for(channel.guild.id)
             try:
@@ -665,10 +719,10 @@ class ShutsujinBell(discord.Client):
                 )
                 continue
 
-            posted[key] = message.id
+            fresh[str(channel_id)] = message.id
             log.info(f"パネルを貼りました「{channel.guild.name} / {channel.name}」")
 
-        self.save_announced(posted)
+        self.save_announced(fresh)
 
     async def find_channel(self, channel_id):
         channel = self.get_channel(channel_id)
