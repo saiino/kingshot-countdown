@@ -107,7 +107,7 @@ Unregister-ScheduledTask -TaskPath "\出陣ベル\" -TaskName "2-VOICEVOX起動"
 VOICEVOXは**焼いていない秒数を使うときの保険**でしかない。不要なら
 上のコマンドでそのタスクだけ消してよい。
 
-停止は強制終了なので `bot.py` の `finally` は通らない。代わりに
+停止は強制終了なので `src/bot.py` の `finally` は通らない。代わりに
 `stop_bot.ps1` がログへ「スケジュールにより停止します」と書き足す。
 
 ## 運用の覚え書き
@@ -118,10 +118,10 @@ VOICEVOXは**焼いていない秒数を使うときの保険**でしかない�
 | やりたいこと | やること |
 |---|---|
 | Botを動かす | `start_bot.bat` をダブルクリック。**動かしている間だけ使える** |
-| 新しい秒数を用意する | VOICEVOXを起動して `voice_countdown.py`（`--discord` 付き） |
+| 新しい秒数を用意する | VOICEVOXを起動して `src/voice_countdown.py`（`--discord` 付き） |
 | ボタンの秒数を変える | `.env` の `COUNTDOWN_PRESETS` を書き換えてBot再起動。**1行5個・最大20個**（最下段は停止ボタンが使う）。増やしたら音声を先に焼いておく |
 | 話者や速さを変える | `.env` の `VOICEVOX_SPEAKER` / `VOICEVOX_SPEED`。**クレジット表記も直す** |
-| 合図や前置きを変える | `bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT`。音声の焼き直しが要る |
+| 合図や前置きを変える | `src/bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT`。音声の焼き直しが要る |
 | コマンドの定義を変えた | **Bot再起動が必要。** 再起動しないと古い定義のまま |
 | メンバー向けマニュアルを更新した | **共有メニューで「Shared version」を最新に選び直す。** 公開中は Latest を選べず、バージョンが固定される |
 
@@ -130,10 +130,9 @@ VOICEVOXは**焼いていない秒数を使うときの保険**でしかない�
   Discord側の応答は本人にしか見えないため、記録はここだけ
   - discord.py の接続・切断イベントも同じファイルに入るので、
     「あのとき落ちていたのか」も追える
-  - 1MBを超えたら世代交代し、3世代まで残る。放っておいても太らない
   - **起動した日ごとに1本**。日付をまたいでも切り替えないので、
     土19時〜日3時の1回ぶんが1ファイルに収まる
-  - **7日より古いものは起動時に自動で消える**（`bot.py` の `LOG_KEEP_DAYS`）。
+  - **7日より古いものは起動時に自動で消える**（`src/bot.py` の `LOG_KEEP_DAYS`）。
     消す対象は `bot-` で始まるログだけなので、`logs/` に置いた他のファイルは残る
   - `logs/` は `.gitignore` 済み。手元にだけ残る
 - **止めるときは Ctrl+C のほうがよい。** 「終了しました」が記録される。
@@ -154,7 +153,7 @@ VOICEVOXは**焼いていない秒数を使うときの保険**でしかない�
 よく使う秒数は先に焼いておくとよい。
 
 ```bash
-python voice_countdown.py 50 0 --speaker 3 --speed 1.2 --lead 3 --cue よーい --discord
+python src/voice_countdown.py 50 0 --speaker 3 --speed 1.2 --lead 3 --cue よーい --discord
 ```
 
 ## Developer Portal の直リンク

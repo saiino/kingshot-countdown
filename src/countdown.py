@@ -3,11 +3,11 @@
 45秒から0秒まで、1秒ごとに残り秒数を表示する。
 全員が同じカウントを聞き、自分の行軍時間の数字が読まれたら出陣する。
 
-    python countdown.py            # 45 -> 0
-    python countdown.py 60         # 60 -> 0
-    python countdown.py 60 30      # 60 -> 30
-    python countdown.py 60 0 --step 5 --dense 10
-    python countdown.py 10 0 --naive   # ズレ補正なし（比較用）
+    python src/countdown.py            # 45 -> 0
+    python src/countdown.py 60         # 60 -> 0
+    python src/countdown.py 60 30      # 60 -> 30
+    python src/countdown.py 60 0 --step 5 --dense 10
+    python src/countdown.py 10 0 --naive   # ズレ補正なし（比較用）
 """
 
 import argparse

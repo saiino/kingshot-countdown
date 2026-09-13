@@ -231,7 +231,7 @@ Discordの**入力**デバイスにBluetoothを選ばなければ、A2DPのま�
 1秒刻みだと差が小さいので、早回しで試すと差がはっきりする。
 
 ```bash
-python -c "import countdown; countdown.TICK=0.02; countdown.run(countdown.build_schedule(200,0), naive=True)"
+python -c "import sys; sys.path.insert(0, 'src'); import countdown; countdown.TICK=0.02; countdown.run(countdown.build_schedule(200,0), naive=True)"
 ```
 
 ### 仕組み
@@ -262,7 +262,7 @@ Discordのボイスは **48kHz・ステレオ・16bit のPCMしか受け取ら�
 **VOICEVOXに最初からその形式で出させる**ので変換処理が丸ごと不要になる。
 
 ```bash
-python voice_countdown.py 45 0 --discord
+python src/voice_countdown.py 45 0 --discord
 ```
 
 Python 3.13で標準ライブラリの `audioop`（音声変換）が削除されているため、

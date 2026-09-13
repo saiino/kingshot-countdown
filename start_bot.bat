@@ -5,7 +5,7 @@ rem
 rem  NOTE: keep this file ASCII-only.
 rem  cmd.exe parses batch files using the system code page (CP932 here),
 rem  so UTF-8 Japanese gets split into garbage and breaks parsing.
-rem  Japanese messages are printed by bot.py instead, which handles
+rem  Japanese messages are printed by src\bot.py instead, which handles
 rem  the Windows console correctly on its own.
 rem ---------------------------------------------------------------
 
@@ -23,7 +23,7 @@ echo Starting the bot...
 echo Press Ctrl+C or close this window to stop it.
 echo.
 
-".venv\Scripts\python.exe" bot.py
+".venv\Scripts\python.exe" src\bot.py
 
 echo.
 echo Bot stopped.

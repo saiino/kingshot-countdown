@@ -26,7 +26,7 @@ Discordのボイスチャンネルに残り秒数を読み上げるBotです。
 | **[VOICEVOX](https://voicevox.hiroshiba.jp/)** | 音声を作るときだけ。焼き済みを流すだけなら不要 |
 | **Discord Bot のトークン** | Botを動かすときだけ |
 
-`bot.py` 以外は**標準ライブラリだけで動きます**。
+`src/bot.py` 以外は**標準ライブラリだけで動きます**。
 
 ## 開発環境をつくる
 
@@ -49,7 +49,7 @@ python -m venv .venv
 起動していると `http://127.0.0.1:50021` でHTTP APIが待ち受けます。
 
 ```bash
-.venv/Scripts/python voice_countdown.py --list-speakers
+.venv/Scripts/python src/voice_countdown.py --list-speakers
 ```
 
 話者IDの一覧が出れば疎通OKです。
@@ -117,7 +117,7 @@ DISCORD_TOKEN=MTIzNDU2Nzg5...
 ### Discord Bot
 
 ```bash
-.venv/Scripts/python bot.py
+.venv/Scripts/python src/bot.py
 ```
 
 `start_bot.bat` をダブルクリックしても同じです。
@@ -133,13 +133,13 @@ DISCORD_TOKEN=MTIzNDU2Nzg5...
 ### 音声を焼く
 
 ```bash
-.venv/Scripts/python voice_countdown.py 45 0 --speaker 3 --speed 1.2 --play
+.venv/Scripts/python src/voice_countdown.py 45 0 --speaker 3 --speed 1.2 --play
 ```
 
 Bot用に焼くときは `--discord` を付けます（48kHzステレオになります）。
 
 ```bash
-.venv/Scripts/python voice_countdown.py 45 0 --discord
+.venv/Scripts/python src/voice_countdown.py 45 0 --discord
 ```
 
 | オプション | 意味 |
@@ -158,7 +158,7 @@ Bot用に焼くときは `--discord` を付けます（48kHzステレオにな�
 ### テキスト版（Discord不要）
 
 ```bash
-python countdown.py 60 30
+python src/countdown.py 60 30
 ```
 
 | オプション | 意味 |
@@ -174,7 +174,7 @@ python countdown.py 60 30
 .venv/Scripts/python -m unittest discover -s tests -t .
 ```
 
-60件。1秒かかりません。
+70件ほど（2026-09-13時点の参考値。機能を足すたびに増える）。数秒で終わります。
 
 | ファイル | 見ているもの | モック |
 |---|---|---|
@@ -182,7 +182,7 @@ python countdown.py 60 30
 | `tests/test_voice_countdown.py` | VOICEVOXへの要求と波形の組み立て | `urlopen` |
 | `tests/test_bot.py` | コマンドの分岐と再生の流れ | interaction / ボイス接続 |
 
-`test_bot.py` だけ discord.py が要ります。残り39件は標準ライブラリだけで動くので、
+`test_bot.py` だけ discord.py が要ります。残り（同時点で37件）は標準ライブラリだけで動くので、
 discord.py を入れていない環境でも回せます。
 
 ```bash
@@ -195,14 +195,17 @@ python -m unittest tests.test_countdown tests.test_voice_countdown
 
 | | 中身 |
 |---|---|
-| `bot.py` | Discord Bot 本体 |
-| `start_bot.bat` | Botの起動用。ダブルクリックで動く |
-| `voice_countdown.py` | VOICEVOXで音声を焼く。Botもこれを呼ぶ |
-| `countdown.py` | テキスト表示のカウントダウン |
-| `countdown_argv.py` | 学習用。同じことを `sys.argv` だけで書いた版 |
+| `src/bot.py` | Discord Bot 本体 |
+| `src/voice_countdown.py` | VOICEVOXで音声を焼く。Botもこれを呼ぶ |
+| `src/countdown.py` | テキスト表示のカウントダウン |
+| `src/countdown_argv.py` | 学習用。同じことを `sys.argv` だけで書いた版 |
+| `start_bot.bat` | Botの起動用。ダブルクリックで動く。タスクスケジューラがこのパスを指しているので**直下から動かさない** |
+| `requirements.txt` / `requirements.lock` | 依存の宣言とロック |
+| `.env.example` | `.env` のひな形 |
 | `tests/` | テスト一式 |
 | `tools/` | アイコン・バナーの生成、停止スクリプト |
 | `assets/` | アイコンとバナー |
+| `docs/` | ドキュメント用の画像 |
 | `voice/` | 焼いた音声（生成物。gitには入れない） |
 | `logs/` | 動作の記録（生成物。gitには入れない） |
 
@@ -216,7 +219,7 @@ python -m unittest tests.test_countdown tests.test_voice_countdown
 | `COUNTDOWN_PRESETS` | `45,60,30` | パネルのボタン（最大20個。最下段は停止ボタン） |
 | `VOICEVOX_HOST` | `http://127.0.0.1:50021` | VOICEVOXのURL |
 
-前置きの無音と合図は `bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT` で変えます。
+前置きの無音と合図は `src/bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT` で変えます。
 
 ### 既知の制約
 
