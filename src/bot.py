@@ -619,8 +619,8 @@ def hello_text(kind, panel_places, panel_command=None):
     """
     lines = [
         "**出陣カウントダウン**",
-        "☀️ 出陣ベル、起きてます！",
-        f"使いたいときは {panel_command or '`/panel`'} でパネルを出してね〜",
+        "Good Morning☀️ いつでも出陣可能だよ！",
+        f"使いたかったら {panel_command or '`/panel`'} 打ってね〜",
     ]
     if kind and panel_places:
         lines.append(f"-# 今夜は{kind}なので、パネルは{'、'.join(panel_places)}に置いてあります")

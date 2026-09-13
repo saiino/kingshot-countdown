@@ -958,7 +958,7 @@ class StartupPanelTest(AnnounceTestBase):
         self.assertEqual(len(jyp.sent), 1)
         content, view = jyp.sent[0]
         self.assertIsNone(view, "挨拶にはボタンを付けない")
-        self.assertIn("起きてます", content)
+        self.assertIn("Good Morning", content)
         self.assertIn("/panel", content)
         self.assertIn("パネルは493のサーバーに置いてあります", content)
         self.assertNotIn("テストサーバー", content, "テストサーバーの名前は出さない")
