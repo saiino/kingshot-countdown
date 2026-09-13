@@ -14,5 +14,12 @@ voice/*.wav
 panel_settings.json
 panel_settings.json.tmp
 
+# 起動時に貼ったパネルの記録（Botが書き換える）
+announced_panels.json
+announced_panels.json.tmp
+
+# 停止スクリプトがBotに送るメモ。ふだんは存在しない
+stop.request
+
 __pycache__/
 *.pyc

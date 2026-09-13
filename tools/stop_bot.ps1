@@ -2,10 +2,17 @@
 #
 #   pwsh -ExecutionPolicy Bypass -File tools\stop_bot.ps1
 #
-# 強制終了なので bot.py 側の finally は通らない。
-# 「なぜ止まったか」が後から分かるよう、ここでログに1行足しておく。
+# まず stop.request というメモを置いて、Botに自分で終わってもらう。
+# Botはメモを見つけると、起動時に貼ったパネルを「停止しました」に書き換え、
+# ログに「終了しました」を残してから終わる。
+# $GraceSeconds 待っても終わらなければ、以前と同じく強制終了する。
+
+param(
+    [int]$GraceSeconds = 20
+)
 
 $root = Split-Path -Parent $PSScriptRoot
+$request = Join-Path $root "stop.request"
 
 # ログは起動した日ごとに1本（bot-YYYY-MM-DD.log）。
 # 土19時起動 → 日3時停止のように日付をまたぐので、「今日の日付」で
@@ -34,23 +41,50 @@ function Write-Log($message) {
     }
 }
 
-# このプロジェクトの bot.py だけを対象にする。
-# 他のPythonまで巻き添えにしないよう、コマンドラインで絞り込む。
-$bots = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
-    Where-Object { $_.CommandLine -like "*bot.py*" -and $_.CommandLine -like "*$($root.Replace('\','\\'))*" }
-
-if (-not $bots) {
-    # 絞り込みで取れないときは bot.py だけを手がかりにする
-    $bots = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
-        Where-Object { $_.CommandLine -like "*bot.py*" }
+function Test-Alive($processes) {
+    @($processes | Where-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }).Count -gt 0
 }
 
-if ($bots) {
+# このプロジェクトの Bot だけを対象にする。他のPythonまで巻き添えにしないよう絞り込む。
+# start_bot.bat は .venv のランチャーを起動し、ランチャーが本体のPythonを子として起動する。
+# コマンドラインは相対パス（src\bot.py）なので、場所ではなく「ランチャーの実体が
+# このフォルダの下にあるか」と「その子か」で見分ける。
+$pythons = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'")
+$launchers = @($pythons | Where-Object {
+    $_.ExecutablePath -like "$root\*" -and $_.CommandLine -like "*bot.py*"
+})
+$launcherIds = @($launchers | ForEach-Object { $_.ProcessId })
+$bots = @($launchers) + @($pythons | Where-Object {
+    $launcherIds -contains $_.ParentProcessId -and $_.CommandLine -like "*bot.py*"
+})
+
+if ($bots.Count -eq 0) {
+    # 絞り込みで取れないときは bot.py だけを手がかりにする
+    $bots = @($pythons | Where-Object { $_.CommandLine -like "*bot.py*" })
+}
+
+if ($bots.Count -gt 0) {
     Write-Log "スケジュールにより停止します"
-    foreach ($p in $bots) {
-        Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
-        Write-Host "止めました: 出陣ベル (PID $($p.ProcessId))"
+
+    # Botに自分で終わってもらう
+    Set-Content -Path $request -Value (Get-Date -Format "yyyy-MM-dd HH:mm:ss") -Encoding utf8
+    $deadline = (Get-Date).AddSeconds($GraceSeconds)
+    while ((Test-Alive $bots) -and ((Get-Date) -lt $deadline)) {
+        Start-Sleep -Milliseconds 500
     }
+
+    if (Test-Alive $bots) {
+        foreach ($p in $bots) {
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        Write-Log "${GraceSeconds}秒待っても終わらなかったので強制終了しました"
+        Write-Host "止めました（強制終了）: 出陣ベル"
+    } else {
+        Write-Host "止まりました: 出陣ベル（自分で終了）"
+    }
+
+    # 使われなかったメモが残ると、次に起動した瞬間に止まってしまう
+    Remove-Item -Path $request -ErrorAction SilentlyContinue
 } else {
     Write-Host "出陣ベルは動いていませんでした"
 }

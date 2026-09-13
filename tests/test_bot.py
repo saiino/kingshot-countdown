@@ -753,5 +753,296 @@ class ReuseFullAudioTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(baked, [(65, 40)])
 
 
+# ------------------------------------------------------ 起動時のパネルと停止時の書き換え
+
+
+def http_error(cls, status):
+    response = mock.MagicMock(status=status, reason="x")
+    return cls(response, "x")
+
+
+class FakeChannel:
+    """投稿・削除・書き換えを記録するだけのチャンネル。"""
+
+    def __init__(self, channel_id=123, guild_id=111, send_error=None):
+        self.id = channel_id
+        self.name = "出陣VC"
+        self.guild = mock.MagicMock(id=guild_id)
+        self.guild.name = "テストサーバー"
+        self.send_error = send_error
+        self.sent = []
+        self.deleted = []
+        self.edited = []
+        self.missing = set()
+        self.next_id = 900
+
+    async def send(self, content, view=None):
+        if self.send_error is not None:
+            raise self.send_error
+        self.next_id += 1
+        self.sent.append((content, view))
+        return mock.MagicMock(id=self.next_id)
+
+    def get_partial_message(self, message_id):
+        channel = self
+
+        class Partial:
+            async def delete(self):
+                if message_id in channel.missing:
+                    raise http_error(discord.NotFound, 404)
+                channel.deleted.append(message_id)
+
+            async def edit(self, content=None, view="未指定"):
+                if message_id in channel.missing:
+                    raise http_error(discord.NotFound, 404)
+                channel.edited.append((message_id, content, view))
+
+        return Partial()
+
+
+class AnnounceTestBase(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        for name, filename in (
+            ("SETTINGS_PATH", "panel_settings.json"),
+            ("ANNOUNCED_PATH", "announced_panels.json"),
+            ("STOP_REQUEST_PATH", "stop.request"),
+        ):
+            patcher = mock.patch.object(bot, name, os.path.join(self.tmp.name, filename))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+        self.bell = bot.ShutsujinBell()
+        self.channel = FakeChannel()
+        self.bell.get_channel = lambda cid: self.channel if cid == self.channel.id else None
+        self.bell.fetch_channel = mock.AsyncMock(side_effect=http_error(discord.NotFound, 404))
+
+    def channels(self, text):
+        patcher = mock.patch.object(bot, "PANEL_CHANNEL_IDS", text)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+
+class StartupPanelTest(AnnounceTestBase):
+    async def test_does_nothing_when_no_channel_is_set(self):
+        """ゲーム用のサーバーには貼らない。何も書かなければ何もしない。"""
+        self.channels("")
+        await self.bell.post_startup_panels()
+        self.assertEqual(self.channel.sent, [])
+        self.assertFalse(os.path.exists(bot.ANNOUNCED_PATH))
+
+    async def test_posts_a_panel_and_remembers_it(self):
+        self.channels("123")
+        await self.bell.post_startup_panels()
+
+        self.assertEqual(len(self.channel.sent), 1)
+        content, view = self.channel.sent[0]
+        self.assertIn("起動しました", content)
+        self.assertIn("ボイスチャンネルに入ってから", content)
+        self.assertIsInstance(view, bot.CountdownPanel)
+        self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {"123": 901})
+
+    async def test_panel_follows_the_saved_end(self):
+        bot.save_end_setting(111, 40, "nori_26523")
+        self.channels("123")
+        with mock.patch.object(bot, "PRESETS", [45, 40]):
+            await self.bell.post_startup_panels()
+
+        content, view = self.channel.sent[0]
+        self.assertIn("40 まで", content)
+        disabled = {b.seconds: b.disabled for b in view.children
+                    if isinstance(b, bot.CountdownButton)}
+        self.assertEqual(disabled, {45: False, 40: True})
+
+    async def test_replaces_the_panel_from_last_time(self):
+        """毎週貼るたびに溜まっていかないこと。"""
+        bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
+        self.channels("123")
+
+        await self.bell.post_startup_panels()
+
+        self.assertEqual(self.channel.deleted, [555])
+        self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {"123": 901})
+
+    async def test_old_panel_deleted_by_hand_is_fine(self):
+        bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
+        self.channel.missing.add(555)
+        self.channels("123")
+
+        await self.bell.post_startup_panels()
+
+        self.assertEqual(len(self.channel.sent), 1)
+
+    async def test_missing_permission_is_reported_not_crashed(self):
+        self.channel.send_error = http_error(discord.Forbidden, 403)
+        self.channels("123")
+
+        with self.assertLogs("bell", level="WARNING") as captured:
+            await self.bell.post_startup_panels()
+
+        self.assertIn("メッセージを送信", "\n".join(captured.output))
+        self.assertNotIn("123", bot.read_json(bot.ANNOUNCED_PATH))
+
+    async def test_unknown_channel_is_skipped(self):
+        self.channels("999, 123")
+
+        with self.assertLogs("bell", level="WARNING") as captured:
+            await self.bell.post_startup_panels()
+
+        self.assertEqual(len(self.channel.sent), 1)
+        self.assertIn("999", "\n".join(captured.output))
+
+    async def test_something_without_messages_is_skipped(self):
+        """カテゴリのIDを書いてしまった場合など。"""
+        category = mock.MagicMock(spec=["id", "name", "guild"])
+        self.bell.get_channel = lambda cid: category
+        self.channels("123")
+
+        with self.assertLogs("bell", level="WARNING"):
+            await self.bell.post_startup_panels()
+
+        self.assertFalse(os.path.exists(bot.ANNOUNCED_PATH) and bot.read_json(bot.ANNOUNCED_PATH))
+
+
+class ParseChannelIdsTest(unittest.TestCase):
+    def test_reads_comma_separated_ids(self):
+        self.assertEqual(bot.parse_channel_ids("123, 456,,"), [123, 456])
+
+    def test_skips_and_reports_things_that_are_not_ids(self):
+        with self.assertLogs("bell", level="WARNING") as captured:
+            ids = bot.parse_channel_ids("123,#出陣VC")
+        self.assertEqual(ids, [123])
+        self.assertIn("#出陣VC", "\n".join(captured.output))
+
+    def test_empty_means_none(self):
+        self.assertEqual(bot.parse_channel_ids(""), [])
+
+
+class GoodbyeTest(AnnounceTestBase):
+    async def test_turns_the_panel_into_a_goodbye_without_buttons(self):
+        bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
+
+        await self.bell.say_goodbye()
+
+        self.assertEqual(len(self.channel.edited), 1)
+        message_id, content, view = self.channel.edited[0]
+        self.assertEqual(message_id, 555)
+        self.assertIn("停止しました", content)
+        self.assertIsNone(view, "ボタンを外す")
+
+    async def test_keeps_the_record_so_the_next_start_can_replace_it(self):
+        bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
+        await self.bell.say_goodbye()
+        self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {"123": 555})
+
+    async def test_deleted_panel_does_not_stop_the_shutdown(self):
+        bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
+        self.channel.missing.add(555)
+
+        with self.assertLogs("bell", level="WARNING"):
+            await self.bell.say_goodbye()
+
+    async def test_nothing_posted_means_nothing_to_do(self):
+        await self.bell.say_goodbye()
+        self.assertEqual(self.channel.edited, [])
+
+    def test_goodbye_says_when_it_stopped(self):
+        from datetime import datetime
+
+        text = bot.goodbye_text(datetime(2026, 9, 20, 3, 0))
+        self.assertIn("停止しました", text)
+        self.assertIn("09/20 03:00", text)
+
+
+class CloseTest(AnnounceTestBase):
+    def logged_in(self):
+        self.bell._connection.user = mock.MagicMock()
+
+    async def test_says_goodbye_once_then_closes(self):
+        self.logged_in()
+        self.bell.say_goodbye = mock.AsyncMock()
+
+        with mock.patch.object(discord.Client, "close", mock.AsyncMock()) as parent_close:
+            await self.bell.close()
+            await self.bell.close()
+
+        self.bell.say_goodbye.assert_awaited_once()
+        self.assertEqual(parent_close.await_count, 2)
+
+    async def test_skips_goodbye_before_login(self):
+        self.bell._connection.user = None
+        self.bell.say_goodbye = mock.AsyncMock()
+
+        with mock.patch.object(discord.Client, "close", mock.AsyncMock()) as parent_close:
+            await self.bell.close()
+
+        self.bell.say_goodbye.assert_not_awaited()
+        parent_close.assert_awaited_once()
+
+    async def test_slow_goodbye_does_not_hold_up_the_shutdown(self):
+        """stop_bot.ps1 に強制終了される前に、自分で終わりきること。"""
+        self.logged_in()
+
+        async def slow():
+            await asyncio.sleep(5)
+
+        self.bell.say_goodbye = slow
+        with mock.patch.object(bot, "GOODBYE_TIMEOUT", 0.05), \
+                mock.patch.object(discord.Client, "close", mock.AsyncMock()) as parent_close:
+            with self.assertLogs("bell", level="WARNING"):
+                await asyncio.wait_for(self.bell.close(), timeout=1)
+
+        parent_close.assert_awaited_once()
+
+    async def test_leaves_the_voice_channel_if_still_playing(self):
+        self.logged_in()
+        self.bell.say_goodbye = mock.AsyncMock()
+        voice_client = mock.MagicMock()
+        voice_client.disconnect = mock.AsyncMock()
+
+        with mock.patch.object(bot.ShutsujinBell, "voice_clients",
+                               new_callable=mock.PropertyMock, return_value=[voice_client]), \
+                mock.patch.object(discord.Client, "close", mock.AsyncMock()):
+            await self.bell.close()
+
+        voice_client.stop.assert_called_once()
+        voice_client.disconnect.assert_awaited_once()
+
+
+class StopRequestTest(AnnounceTestBase):
+    async def test_closes_when_the_note_appears(self):
+        self.bell.close = mock.AsyncMock()
+        with open(bot.STOP_REQUEST_PATH, "w", encoding="utf-8") as handle:
+            handle.write("x")
+
+        with mock.patch.object(bot, "STOP_POLL_SECONDS", 0.01):
+            await asyncio.wait_for(self.bell.watch_for_stop_request(), timeout=1)
+
+        self.bell.close.assert_awaited_once()
+        self.assertFalse(os.path.exists(bot.STOP_REQUEST_PATH), "メモは片付ける")
+
+    async def test_keeps_running_without_a_note(self):
+        self.bell.close = mock.AsyncMock()
+
+        with mock.patch.object(bot, "STOP_POLL_SECONDS", 0.01):
+            with self.assertRaises(asyncio.TimeoutError):
+                await asyncio.wait_for(self.bell.watch_for_stop_request(), timeout=0.1)
+
+        self.bell.close.assert_not_awaited()
+
+    def test_leftover_note_is_cleared_at_startup(self):
+        """残っていると、起動した瞬間に止まってしまう。"""
+        with open(bot.STOP_REQUEST_PATH, "w", encoding="utf-8") as handle:
+            handle.write("x")
+
+        with self.assertLogs("bell", level="INFO"):
+            self.assertTrue(bot.clear_stale_stop_request())
+        self.assertFalse(os.path.exists(bot.STOP_REQUEST_PATH))
+        self.assertFalse(bot.clear_stale_stop_request())
+
+
 if __name__ == "__main__":
     unittest.main()

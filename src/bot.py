@@ -4,6 +4,9 @@
     /panel             … よく使う秒数のボタンと、終わりの秒数の選択欄を設置（普段はこっち）
     /stop              … 再生を止めて退出
 
+起動したら .env の PANEL_CHANNEL_IDS のチャンネルにパネルを貼り、
+止まるときにそのパネルを「停止しました」へ書き換える。
+
 音声は voice_countdown.py が焼いた wav をそのまま流すだけ。
 Discordのボイスは 48kHz・ステレオ・16bit しか受け取らないが、
 VOICEVOXに最初からその形式で出させているので変換処理は要らない。
@@ -90,6 +93,21 @@ END_CHOICES = list(range(0, 55, 5))
 # サーバーごとの「終わり」の設定。再起動しても黙って0に戻らないよう、ファイルに残す。
 SETTINGS_PATH = os.path.join(ROOT, "panel_settings.json")
 
+# 起動したときにパネルを貼るチャンネル（カンマ区切りのID）。空なら貼らない。
+# ゲーム用のサーバーに毎回貼ると通知がうるさいので、今はテストサーバーだけにしている。
+PANEL_CHANNEL_IDS = ENV.get("PANEL_CHANNEL_IDS", "")
+
+# 起動時に貼ったパネルのメッセージID。次の起動で消す・止まるときに書き換えるのに使う。
+ANNOUNCED_PATH = os.path.join(ROOT, "announced_panels.json")
+
+# tools/stop_bot.ps1 が置く「止まってね」のメモ。見つけたら後片付けをして自分で終わる。
+STOP_REQUEST_PATH = os.path.join(ROOT, "stop.request")
+STOP_POLL_SECONDS = 2
+
+# 止まるときの書き換えにかける時間の上限。stop_bot.ps1 は20秒で強制終了に切り替えるので、
+# それより十分短くしておく。
+GOODBYE_TIMEOUT = 10
+
 
 # ------------------------------------------------------------------- 音声の用意
 
@@ -150,17 +168,30 @@ def trim_to_end(pcm, end):
     return pcm[: len(pcm) - end * DISCORD_BYTES_PER_SECOND]
 
 
-# ------------------------------------------------------------- 終わりの設定
+# ----------------------------------------------------- 手元に残す小さな記録
 
 
-def load_end_settings():
-    """サーバーごとの終わりの設定を読む。無い・壊れているときは空として扱う。"""
+def read_json(path):
+    """JSONを辞書として読む。無い・壊れている・辞書でないときは空として扱う。"""
     try:
-        with open(SETTINGS_PATH, encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def write_json(path, data):
+    # 書いている途中で落ちても元のファイルが壊れないよう、一時ファイルから差し替える
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def load_end_settings():
+    """サーバーごとの終わりの設定を読む。"""
+    return read_json(SETTINGS_PATH)
 
 
 def end_setting_for(guild_id):
@@ -177,11 +208,7 @@ def end_setting_for(guild_id):
 def save_end_setting(guild_id, end, by):
     data = load_end_settings()
     data[str(guild_id)] = {"end": end, "by": by}
-    # 書いている途中で落ちても元のファイルが壊れないよう、一時ファイルから差し替える
-    tmp = SETTINGS_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump(data, handle, ensure_ascii=False, indent=2)
-    os.replace(tmp, SETTINGS_PATH)
+    write_json(SETTINGS_PATH, data)
 
 
 # --------------------------------------------------------------------- 記録
@@ -372,14 +399,15 @@ async def stop_playback(interaction, how):
 # 古いパネルには選択欄がないが、ボタンは保存された終わりの設定で動く。
 
 
-def panel_text(guild_id):
+def panel_text(guild_id, note=None):
     end, by = end_setting_for(guild_id)
     who = f"（{by} が変更）" if by else ""
-    return (
-        "**出陣カウントダウン**\n"
-        f"いまの設定：**{end} まで**数える{who}\n"
-        "ボイスチャンネルに入ってから押してください。"
-    )
+    lines = ["**出陣カウントダウン**"]
+    if note:
+        lines.append(note)
+    lines.append(f"いまの設定：**{end} まで**数える{who}")
+    lines.append("ボイスチャンネルに入ってから押してください。")
+    return "\n".join(lines)
 
 
 class EndSelect(discord.ui.Select):
@@ -484,6 +512,47 @@ class CountdownPanel(discord.ui.View):
         self.add_item(StopButton(row=1 + (len(presets) + 4) // 5))
 
 
+# ------------------------------------------------------------ 起動と停止の案内
+
+
+def parse_channel_ids(text):
+    """「123, 456」を [123, 456] にする。数字でないものは知らせて飛ばす。"""
+    ids = []
+    for part in text.split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.append(int(part))
+        elif part:
+            log.warning(f"PANEL_CHANNEL_IDS の「{part}」はチャンネルIDではないので飛ばします")
+    return ids
+
+
+def goodbye_text(now=None):
+    now = now or datetime.now()
+    return (
+        "**出陣カウントダウン**\n"
+        "出陣ベルは停止しました。またね！\n"
+        f"（{now:%m/%d %H:%M} に停止。次に起動すると、ここに新しいパネルが出ます）"
+    )
+
+
+def clear_stale_stop_request():
+    """前回の「止まってね」のメモが残っていたら消す。
+
+    残っていると、起動した直後にメモを見つけて止まってしまう。
+    stop_bot.ps1 も後で消しているが、途中で落ちた場合に備えてここでも見る。
+    """
+    try:
+        os.remove(STOP_REQUEST_PATH)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        log.warning(f"前回の停止のメモを消せませんでした: {exc}")
+        return False
+    log.info("前回の停止のメモが残っていたので消しました")
+    return True
+
+
 # ------------------------------------------------------------------- Bot本体
 
 
@@ -493,10 +562,13 @@ class ShutsujinBell(discord.Client):
         super().__init__(intents=discord.Intents.default())
         self.tree = app_commands.CommandTree(self)
         self.ready_once = False
+        self.goodbye_done = False
 
     async def setup_hook(self):
         # 再起動しても既存のパネルのボタンが反応するように登録し直す
         self.add_view(CountdownPanel())
+        # 停止のメモは起動直後から見張る。on_ready を待つと、その前に来たメモを取りこぼす
+        self.stop_watcher = asyncio.create_task(self.watch_for_stop_request())
 
     async def on_ready(self):
         # on_ready は起動時だけでなく、再接続のたびに呼ばれる。
@@ -521,6 +593,7 @@ class ShutsujinBell(discord.Client):
         log.info(f"話者ID {SPEAKER} / 速さ {SPEED} / ボタン {PRESETS}")
 
         asyncio.create_task(self.prebake())
+        await self.post_startup_panels()
 
     async def on_guild_join(self, guild):
         """新しいサーバーに追加されたときも、そこへコマンドを配る。
@@ -542,6 +615,139 @@ class ShutsujinBell(discord.Client):
                 log.warning(f"  用意できず {seconds}秒: {exc}")
                 log.warning("  （VOICEVOXを起動すれば、押したときに焼き直します）")
                 return
+
+    # ------------------------------------------------------ 起動時のパネル
+
+    async def post_startup_panels(self):
+        """.env の PANEL_CHANNEL_IDS のチャンネルにパネルを貼る。
+
+        前回の起動で貼ったものは消してから貼る。残すと毎週1枚ずつ溜まっていくし、
+        新しく貼れば一番下に出るので、チャットが流れていても見つけやすい。
+        """
+        channel_ids = parse_channel_ids(PANEL_CHANNEL_IDS)
+        if not channel_ids:
+            return
+
+        posted = read_json(ANNOUNCED_PATH)
+        for channel_id in channel_ids:
+            key = str(channel_id)
+            channel = await self.find_channel(channel_id)
+            if channel is None:
+                continue
+
+            old_id = posted.pop(key, None)
+            if old_id is not None:
+                await self.delete_quietly(channel, old_id)
+
+            end, _ = end_setting_for(channel.guild.id)
+            try:
+                message = await channel.send(
+                    panel_text(channel.guild.id, note="出陣ベルが起動しました。"),
+                    view=CountdownPanel(current=end),
+                )
+            except discord.HTTPException as exc:
+                log.warning(
+                    f"パネルを貼れませんでした「{channel.name}」: {exc}"
+                    "（そのチャンネルでBotに「チャンネルを見る」「メッセージを送信」の権限があるか確認）"
+                )
+                continue
+
+            posted[key] = message.id
+            log.info(f"パネルを貼りました「{channel.guild.name} / {channel.name}」")
+
+        self.save_announced(posted)
+
+    async def find_channel(self, channel_id):
+        channel = self.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.fetch_channel(channel_id)
+            except (discord.HTTPException, discord.InvalidData) as exc:
+                log.warning(f"チャンネルが見つかりません（ID {channel_id}）: {exc}")
+                return None
+        if not hasattr(channel, "send"):
+            # カテゴリのIDなど、メッセージを置けないもの
+            log.warning(f"ID {channel_id} はメッセージを置けるチャンネルではありません")
+            return None
+        return channel
+
+    async def delete_quietly(self, channel, message_id):
+        try:
+            await channel.get_partial_message(int(message_id)).delete()
+        except discord.NotFound:
+            pass  # 手で消されていた
+        except (discord.HTTPException, ValueError, TypeError) as exc:
+            log.warning(f"前回のパネルを消せませんでした（{message_id}）: {exc}")
+
+    def save_announced(self, posted):
+        try:
+            write_json(ANNOUNCED_PATH, posted)
+        except OSError as exc:
+            log.warning(f"貼ったパネルの記録を保存できませんでした: {exc}")
+
+    # ---------------------------------------------------------- 止まるとき
+
+    async def watch_for_stop_request(self):
+        """stop_bot.ps1 が置くメモを見張り、見つけたら自分で終わる。
+
+        タスクスケジューラの停止は以前いきなり強制終了していたので、
+        パネルを書き換える暇も、ログに「終了しました」を残す暇もなかった。
+        """
+        while not self.is_closed():
+            if os.path.exists(STOP_REQUEST_PATH):
+                log.info("停止のメモを受け取りました。後片付けをして終了します")
+                try:
+                    os.remove(STOP_REQUEST_PATH)
+                except OSError:
+                    pass
+                await self.close()
+                return
+            await asyncio.sleep(STOP_POLL_SECONDS)
+
+    async def say_goodbye(self):
+        """起動時に貼ったパネルを「停止しました」に書き換えて、ボタンを外す。
+
+        停止中に古いボタンが押されて「応答しませんでした」になるのを防ぐ。
+        メッセージは消さずに残し、次の起動で消して貼り直す。
+        """
+        text = goodbye_text()
+        for key, message_id in read_json(ANNOUNCED_PATH).items():
+            try:
+                channel = await self.find_channel(int(key))
+                if channel is None:
+                    continue
+                await channel.get_partial_message(int(message_id)).edit(
+                    content=text, view=None
+                )
+                log.info(f"パネルを停止中にしました「{channel.name}」")
+            except (discord.HTTPException, ValueError, TypeError) as exc:
+                log.warning(f"パネルを停止中にできませんでした（{key}）: {exc}")
+
+    async def close(self):
+        """終わる前に後片付けをする。
+
+        stop_bot.ps1 のメモで止めたときも、Ctrl+C で止めたときもここを通る。
+        ×で閉じる・強制終了・スリープではPythonが動けないので通らない。
+        """
+        if not self.goodbye_done:
+            self.goodbye_done = True
+
+            # 再生中なら切っておく。繋がったまま落ちると、しばらくVCに残って見える
+            for voice_client in list(self.voice_clients):
+                try:
+                    voice_client.stop()
+                    await voice_client.disconnect(force=True)
+                except (discord.ClientException, discord.HTTPException, asyncio.TimeoutError) as exc:
+                    log.warning(f"ボイスチャンネルから抜けられませんでした: {exc}")
+
+            # ログイン前に止まった場合は、Discordに何も送れない
+            if self.user is not None:
+                try:
+                    await asyncio.wait_for(self.say_goodbye(), timeout=GOODBYE_TIMEOUT)
+                except asyncio.TimeoutError:
+                    log.warning("パネルの書き換えが時間内に終わらなかったので、そのまま終了します")
+
+        await super().close()
 
 
 client = ShutsujinBell()
@@ -598,6 +804,7 @@ def main():
 
     log.info("=" * 52)
     log.info(f"起動します（記録: {log_path_for_today()}）")
+    clear_stale_stop_request()
 
     try:
         # log_handler=None にすると discord.py が自前のログ設定をしないので、
@@ -610,8 +817,8 @@ def main():
         )
         return 1
     finally:
-        # Ctrl+C で止めた場合はここを通る。
-        # ウィンドウの×で閉じるとプロセスごと消えるので記録は残らない。
+        # Ctrl+C や stop_bot.ps1 のメモで止めた場合はここを通る。
+        # ウィンドウの×で閉じる・強制終了ではプロセスごと消えるので記録は残らない。
         log.info("終了しました")
 
     return 0
