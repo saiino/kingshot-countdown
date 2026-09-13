@@ -567,6 +567,27 @@ class DevPanelLayoutTest(unittest.TestCase):
         chosen = [o.value for o in select.options if o.default]
         self.assertEqual(chosen, ["20"])
 
+    def test_end_can_be_set_as_high_as_fifty(self):
+        self.assertIn(40, bot.END_CHOICES)
+        self.assertEqual(max(bot.END_CHOICES), 50)
+        self.assertLessEqual(len(bot.END_CHOICES), 25, "選択欄に並べられるのは25個まで")
+
+    def test_buttons_that_cannot_count_are_greyed_out(self):
+        """終わりが50なら、40・45・50秒は数えるものがない。押せなくしておく。"""
+        with mock.patch.object(bot, "PRESETS", [80, 55, 50, 45, 40]):
+            panel = bot.DevCountdownPanel(current=50)
+
+        state = {
+            b.seconds: b.disabled
+            for b in panel.children if isinstance(b, bot.DevCountdownButton)
+        }
+        self.assertEqual(state, {80: False, 55: False, 50: True, 45: True, 40: True})
+        self.assertFalse(panel.children[-1].disabled, "止めるは常に押せる")
+
+    def test_nothing_is_greyed_out_when_counting_to_zero(self):
+        panel = bot.DevCountdownPanel()
+        self.assertFalse(any(getattr(c, "disabled", False) for c in panel.children))
+
     def test_stop_button_sits_alone_on_the_last_row(self):
         """要望: 終わりを選べても、やり直し用に止めるボタンは残す。"""
         last = bot.DevCountdownPanel().to_components()[-1]["components"]

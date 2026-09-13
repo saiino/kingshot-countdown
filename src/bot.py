@@ -86,7 +86,9 @@ PRESETS = [
 # 試作パネル（/panel_dev）: 終わりの秒数を選べる。
 # 選択欄が1行使うので、秒数ボタンは3行ぶんまで。
 DEV_MAX_BUTTONS = 15
-END_CHOICES = [0, 5, 10, 15, 20, 25, 30]
+# 5秒刻みで50まで。選択欄に並べられるのは25個まで。
+# 開始秒以下を選ぶとそのボタンは数えるものがないので、パネルでは灰色にする。
+END_CHOICES = list(range(0, 55, 5))
 
 # サーバーごとの「終わり」の設定。再起動しても黙って0に戻らないよう、ファイルに残す。
 SETTINGS_PATH = os.path.join(ROOT, "panel_settings.json")
@@ -497,7 +499,11 @@ class DevCountdownPanel(discord.ui.View):
         # 行が溢れて、起動時の登録で落ちる。
         presets = PRESETS[:DEV_MAX_BUTTONS]
         for index, seconds in enumerate(presets):
-            self.add_item(DevCountdownButton(seconds, row=1 + index // 5))
+            button = DevCountdownButton(seconds, row=1 + index // 5)
+            # 終わり以下の秒数は数えるものがないので押せなくする。
+            # 表示が古いパネルから押された場合に備えて、callback 側でも断っている。
+            button.disabled = seconds <= current
+            self.add_item(button)
 
         self.add_item(
             StopButton(row=1 + (len(presets) + 4) // 5, custom_id="kingshot:dev:stop")
