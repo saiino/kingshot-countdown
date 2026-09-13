@@ -619,7 +619,8 @@ def hello_text(kind, panel_places, panel_command=None):
     """
     lines = [
         "**出陣カウントダウン**",
-        "Good Morning☀️ いつでも出陣可能だよ！",
+        # 止まったときの「💤 出陣ベルはおやすみ中です。バイバイ〜👋」と同じ形にそろえる
+        "☀️ 出陣ベルはいつでも出陣可能です。Good Morning〜👋",
         f"使いたかったら {panel_command or '`/panel`'} 打ってね〜",
     ]
     if kind and panel_places:
