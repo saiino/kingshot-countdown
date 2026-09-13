@@ -187,7 +187,7 @@ VOICEVOXは**焼いていない秒数を使うときの保険**でしかない�
 よく使う秒数は先に焼いておくとよい。
 
 ```bash
-python src/voice_countdown.py 50 0 --speaker 3 --speed 1.2 --lead 3 --cue よーい --discord
+python src/voice_countdown.py 50 0 --speaker 3 --speed 1.2 --lead 1.8 --cue よーい --discord
 ```
 
 ## Developer Portal の直リンク
