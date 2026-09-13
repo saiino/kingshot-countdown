@@ -100,7 +100,7 @@ SETTINGS_PATH = os.path.join(ROOT, "panel_settings.json")
 # 起動したときにパネルを貼るチャンネル（カンマ区切りのID）。空なら貼らない。
 #   PANEL_CHANNEL_IDS         … 毎週（戦闘がない週も）。今はノリーのテストサーバー
 #   PANEL_CHANNELS_SERVER_WAR … 鯖戦の週だけ（サーバー共通の 493のサーバー）
-#   PANEL_CHANNELS_DOMESTIC   … 国内戦の週だけ（同盟の 【JYP】自由の誉火）
+#   PANEL_CHANNELS_DOMESTIC   … 国内戦の夜だけ（同盟の 【JYP】自由の誉火）。鯖戦の夜は挨拶だけ出す
 # ゲーム用のサーバーに毎週貼ると通知がうるさいので、戦闘がある週だけにしている。
 PANEL_CHANNEL_IDS = ENV.get("PANEL_CHANNEL_IDS", "")
 PANEL_CHANNELS_SERVER_WAR = ENV.get("PANEL_CHANNELS_SERVER_WAR", "")
@@ -586,12 +586,45 @@ def channel_ids_for(now):
     """(今夜の種類, 貼るチャンネルID) を返す。毎週ぶんに、戦闘の夜のぶんを足す。"""
     night = battle_night(now)
     kind = battle_kind(night, BATTLE_ANCHOR_DATE) if night else None
-    extra = {"鯖戦": PANEL_CHANNELS_SERVER_WAR, "国内戦": PANEL_CHANNELS_DOMESTIC}.get(kind, "")
     ids = []
-    for channel_id in parse_channel_ids(PANEL_CHANNEL_IDS) + parse_channel_ids(extra):
+    for channel_id in parse_channel_ids(PANEL_CHANNEL_IDS) + battle_channel_ids(kind):
         if channel_id not in ids:
             ids.append(channel_id)
     return kind, ids
+
+
+def battle_channel_ids(kind):
+    """その戦闘の夜にパネルを貼るチャンネル（毎週ぶんは含まない）。"""
+    text = {"鯖戦": PANEL_CHANNELS_SERVER_WAR, "国内戦": PANEL_CHANNELS_DOMESTIC}.get(kind, "")
+    return parse_channel_ids(text)
+
+
+def hello_channel_ids_for(kind, panel_ids):
+    """パネルは出さずに挨拶だけするチャンネル。
+
+    鯖戦の夜は、同盟のサーバー（国内戦のチャンネル）に「/panel で呼べるよ」とだけ出す。
+    鯖戦のパネルは493に置くが、同盟のサーバーでも使いたくなることがあるため。
+    国内戦の夜に493へ挨拶しないのは、他の同盟もいる共通サーバーだから。
+    """
+    if kind != "鯖戦":
+        return []
+    return [i for i in parse_channel_ids(PANEL_CHANNELS_DOMESTIC) if i not in panel_ids]
+
+
+def hello_text(kind, panel_places, panel_command=None):
+    """パネルは出さずに「使えるよ」とだけ伝える文言。
+
+    panel_command に </panel:コマンドID> を渡すと、Discord上で押せるリンクになる。
+    分からないときは、ただの文字の /panel にする。
+    """
+    lines = [
+        "**出陣カウントダウン**",
+        "☀️ 出陣ベル、起きてます！",
+        f"使いたいときは {panel_command or '`/panel`'} でパネルを出してね〜",
+    ]
+    if kind and panel_places:
+        lines.append(f"-# 今夜は{kind}なので、パネルは{'、'.join(panel_places)}に置いてあります")
+    return "\n".join(lines)
 
 
 STARTUP_NOTE = "🔔 出陣ベル、起動しました！"
@@ -608,7 +641,7 @@ def goodbye_text(now=None):
     return (
         "**出陣カウントダウン**\n"
         "💤 出陣ベルはおやすみ中です。バイバイ〜👋\n"
-        f"-# <t:{int(now.timestamp())}:f> に停止 ・ 次に起動すると、ここに新しいパネルが出ます"
+        f"-# <t:{int(now.timestamp())}:f> に停止 ・ 次に起動したら、またここでお知らせします"
     )
 
 
@@ -639,6 +672,8 @@ class ShutsujinBell(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.ready_once = False
         self.goodbye_done = False
+        # サーバーごとのコマンドID。挨拶の /panel を押せるリンクにするのに使う
+        self.command_ids = {}
 
     async def setup_hook(self):
         # 再起動しても既存のパネルのボタンが反応するように登録し直す
@@ -662,7 +697,8 @@ class ShutsujinBell(discord.Client):
         # 参加中のサーバーへ直接配ると即座に使えるようになる。
         for guild in self.guilds:
             self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
+            synced = await self.tree.sync(guild=guild)
+            self.command_ids[guild.id] = {command.name: command.id for command in synced}
 
         log.info(f"ログイン: {self.user}")
         log.info(f"サーバー: {', '.join(g.name for g in self.guilds) or '(なし)'}")
@@ -710,8 +746,9 @@ class ShutsujinBell(discord.Client):
             else:
                 log.info("戦闘の夜ではないので、毎週のチャンネルだけに貼ります")
 
+        hello_ids = hello_channel_ids_for(kind, channel_ids)
         posted = read_json(ANNOUNCED_PATH)
-        if not channel_ids and not posted:
+        if not channel_ids and not hello_ids and not posted:
             return
 
         for key, old_id in posted.items():
@@ -721,6 +758,8 @@ class ShutsujinBell(discord.Client):
             if channel is not None:
                 await self.delete_quietly(channel, old_id)
 
+        battle_ids = battle_channel_ids(kind)
+        places = []
         fresh = {}
         for channel_id in channel_ids:
             channel = await self.find_channel(channel_id)
@@ -742,8 +781,34 @@ class ShutsujinBell(discord.Client):
 
             fresh[str(channel_id)] = message.id
             log.info(f"パネルを貼りました「{channel.guild.name} / {channel.name}」")
+            # 挨拶に「パネルはどこにあるか」を書くため。毎週のチャンネル（テストサーバー）は含めない
+            name = channel.guild.name
+            if channel_id in battle_ids and name and name not in places:
+                places.append(name)
+
+        for channel_id in hello_ids:
+            channel = await self.find_channel(channel_id)
+            if channel is None:
+                continue
+            try:
+                message = await channel.send(
+                    hello_text(kind, places, self.panel_command_mention(channel.guild.id))
+                )
+            except discord.HTTPException as exc:
+                log.warning(
+                    f"挨拶を出せませんでした「{channel.name}」: {exc}"
+                    "（そのチャンネルでBotに「チャンネルを見る」「メッセージを送信」の権限があるか確認）"
+                )
+                continue
+            fresh[str(channel_id)] = message.id
+            log.info(f"挨拶しました「{channel.guild.name} / {channel.name}」")
 
         self.save_announced(fresh)
+
+    def panel_command_mention(self, guild_id):
+        """そのサーバーの /panel を押せるリンクにする。IDが分からなければ None。"""
+        command_id = self.command_ids.get(guild_id, {}).get("panel")
+        return f"</panel:{command_id}>" if command_id else None
 
     async def find_channel(self, channel_id):
         channel = self.get_channel(channel_id)

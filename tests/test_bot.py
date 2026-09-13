@@ -929,6 +929,72 @@ class StartupPanelTest(AnnounceTestBase):
         self.assertEqual(len(self.channel.sent), 1)
         self.assertIn("戦闘の夜ではない", "\n".join(captured.output))
 
+    def battle_channels(self):
+        """test / 鯖戦(493) / 国内戦(JYP) の3チャンネルを用意する。"""
+        war = FakeChannel(channel_id=222, guild_id=493)
+        war.guild.name = "493のサーバー"
+        jyp = FakeChannel(channel_id=333, guild_id=777)
+        jyp.guild.name = "【JYP】自由の誉火"
+        self.bell.get_channel = {123: self.channel, 222: war, 333: jyp}.get
+        self.channels("123")
+        for name, value in (
+            ("BATTLE_ANCHOR_DATE", "2026-09-12"),
+            ("PANEL_CHANNELS_SERVER_WAR", "222"),
+            ("PANEL_CHANNELS_DOMESTIC", "333"),
+        ):
+            patcher = mock.patch.object(bot, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return war, jyp
+
+    async def test_greets_the_alliance_server_on_a_server_war_night(self):
+        """鯖戦の夜は、JYPにパネルは出さず「/panel で呼べるよ」とだけ出す。"""
+        from datetime import datetime
+
+        war, jyp = self.battle_channels()
+        await self.bell.post_startup_panels(now=datetime(2026, 10, 10, 19, 0))
+
+        self.assertIsInstance(war.sent[0][1], bot.CountdownPanel)
+        self.assertEqual(len(jyp.sent), 1)
+        content, view = jyp.sent[0]
+        self.assertIsNone(view, "挨拶にはボタンを付けない")
+        self.assertIn("起きてます", content)
+        self.assertIn("/panel", content)
+        self.assertIn("パネルは493のサーバーに置いてあります", content)
+        self.assertNotIn("テストサーバー", content, "テストサーバーの名前は出さない")
+        self.assertEqual(
+            bot.read_json(bot.ANNOUNCED_PATH), {"123": 901, "222": 901, "333": 901}
+        )
+
+    async def test_does_not_greet_the_shared_server_on_a_domestic_night(self):
+        """国内戦の夜、493（他の同盟もいる共通サーバー）には何も出さない。"""
+        from datetime import datetime
+
+        war, jyp = self.battle_channels()
+        await self.bell.post_startup_panels(now=datetime(2026, 9, 26, 19, 0))
+
+        self.assertEqual(war.sent, [])
+        self.assertIsInstance(jyp.sent[0][1], bot.CountdownPanel)
+
+    async def test_greeting_links_to_the_command_when_its_id_is_known(self):
+        from datetime import datetime
+
+        war, jyp = self.battle_channels()
+        self.bell.command_ids = {777: {"panel": 42, "stop": 43}}
+        await self.bell.post_startup_panels(now=datetime(2026, 10, 10, 19, 0))
+
+        self.assertIn("</panel:42>", jyp.sent[0][0])
+
+    async def test_greeting_turns_into_goodbye_like_a_panel(self):
+        from datetime import datetime
+
+        war, jyp = self.battle_channels()
+        await self.bell.post_startup_panels(now=datetime(2026, 10, 10, 19, 0))
+        await self.bell.say_goodbye()
+
+        self.assertEqual(len(jyp.edited), 1)
+        self.assertIn("おやすみ中", jyp.edited[0][1])
+
     async def test_old_panel_deleted_by_hand_is_fine(self):
         bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
         self.channel.missing.add(555)
@@ -1044,6 +1110,29 @@ class ChannelsForWeekTest(unittest.TestCase):
     def test_weekdays_never_post_to_the_battle_channel(self):
         self.assertEqual(self.ids(9, 11), (None, [1]))   # 鯖戦前日の金曜
         self.assertEqual(self.ids(9, 16), (None, [1]))   # 水曜
+
+class HelloTest(unittest.TestCase):
+    def test_only_on_a_server_war_night(self):
+        with mock.patch.object(bot, "PANEL_CHANNELS_DOMESTIC", "4, 5"):
+            self.assertEqual(bot.hello_channel_ids_for("鯖戦", [1, 2]), [4, 5])
+            self.assertEqual(bot.hello_channel_ids_for("国内戦", [1, 4]), [])
+            self.assertEqual(bot.hello_channel_ids_for(None, [1]), [])
+
+    def test_a_channel_getting_a_panel_is_not_also_greeted(self):
+        with mock.patch.object(bot, "PANEL_CHANNELS_DOMESTIC", "4, 5"):
+            self.assertEqual(bot.hello_channel_ids_for("鯖戦", [4]), [5])
+
+    def test_text_falls_back_to_plain_command(self):
+        text = bot.hello_text("鯖戦", ["493のサーバー"])
+        self.assertIn("`/panel`", text)
+        self.assertTrue(text.splitlines()[-1].startswith("-# 今夜は鯖戦なので"))
+
+    def test_text_uses_the_clickable_command(self):
+        self.assertIn("</panel:42>", bot.hello_text("鯖戦", [], "</panel:42>"))
+
+    def test_no_place_line_when_the_panel_could_not_be_posted(self):
+        self.assertNotIn("-#", bot.hello_text("鯖戦", []))
+
 
 class ParseChannelIdsTest(unittest.TestCase):
     def test_reads_comma_separated_ids(self):

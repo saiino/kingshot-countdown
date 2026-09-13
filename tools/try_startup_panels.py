@@ -39,6 +39,8 @@ def describe(when):
     print(f"{when:%Y-%m-%d}（{WEEKDAYS[when.weekday()]}）{when:%H:%M} に起動したとき")
     print(f"  判定  : {kind or '戦闘の夜ではない'}")
     print(f"  貼る先: {', '.join(str(i) for i in ids) or '（なし）'}")
+    hello = bot.hello_channel_ids_for(kind, ids)
+    print(f"  挨拶だけ: {', '.join(str(i) for i in hello) or '（なし）'}")
     print(f"    .env 毎週   PANEL_CHANNEL_IDS         = {bot.PANEL_CHANNEL_IDS or '（空）'}")
     print(f"    .env 鯖戦   PANEL_CHANNELS_SERVER_WAR = {bot.PANEL_CHANNELS_SERVER_WAR or '（空）'}")
     print(f"    .env 国内戦 PANEL_CHANNELS_DOMESTIC   = {bot.PANEL_CHANNELS_DOMESTIC or '（空）'}")

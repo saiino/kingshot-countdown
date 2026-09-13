@@ -222,7 +222,7 @@ python -m unittest tests.test_countdown tests.test_voice_countdown
 | `COUNTDOWN_PRESETS` | `45,60,30` | パネルのボタン（最大15個。一番上は選択欄、最下段は停止ボタン） |
 | `PANEL_CHANNEL_IDS` | （空） | 毎週、起動時にパネルを貼るチャンネルのID。カンマ区切り |
 | `PANEL_CHANNELS_SERVER_WAR` | （空） | 鯖戦の夜（土曜〜日曜6時）に起動したときだけ貼るチャンネルのID |
-| `PANEL_CHANNELS_DOMESTIC` | （空） | 国内戦の夜（土曜〜日曜6時）に起動したときだけ貼るチャンネルのID |
+| `PANEL_CHANNELS_DOMESTIC` | （空） | 国内戦の夜（土曜〜日曜6時）に起動したときだけ貼るチャンネルのID。鯖戦の夜は挨拶だけ出す |
 | `BATTLE_ANCHOR_DATE` | `2026-09-12` | 鯖戦だった土曜日。ここから2週おきに鯖戦・国内戦を判定する |
 | `VOICEVOX_HOST` | `http://127.0.0.1:50021` | VOICEVOXのURL |
 
