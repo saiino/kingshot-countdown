@@ -787,6 +787,8 @@ class FakeChannel:
         channel = self
 
         class Partial:
+            jump_url = f"https://discord.com/channels/{channel.guild.id}/{channel.id}/{message_id}"
+
             async def delete(self):
                 if message_id in channel.missing:
                     raise http_error(discord.NotFound, 404)
@@ -1186,6 +1188,78 @@ class LoadAnnouncedTest(unittest.TestCase):
 
     def test_missing_file_is_empty(self):
         self.assertEqual(bot.load_announced(), ({}, []))
+
+
+class PanelCommandTest(AnnounceTestBase):
+    """/panel もチャンネルのBotの1通を使い回す。"""
+
+    def command_interaction(self):
+        interaction = make_interaction()
+        interaction.guild.id = 111
+        interaction.channel = self.channel
+        interaction.original_response = mock.AsyncMock(return_value=mock.MagicMock(id=950))
+        return interaction
+
+    async def test_turns_the_existing_message_into_a_panel(self):
+        """鯖戦の夜のJYPで /panel → 挨拶の1通がパネルになり、メッセージは増えない。"""
+        bot.write_json(bot.ANNOUNCED_PATH, {"messages": {"123": 700}, "active": []})
+        interaction = self.command_interaction()
+
+        await bot.panel_command.callback(interaction)
+
+        self.assertEqual(self.channel.sent, [])
+        message_id, content, view = self.channel.edited[0]
+        self.assertEqual(message_id, 700)
+        self.assertIn("待機中", content)
+        self.assertIsInstance(view, bot.CountdownPanel)
+        call = interaction.response.send_message.await_args
+        self.assertTrue(call.kwargs.get("ephemeral"), "リンクは打った人にだけ見せる")
+        self.assertIn("/123/700", call.args[0])
+        self.assertEqual(bot.load_announced(), ({"123": 700}, ["123"]), "止まるとき出陣完了にする")
+
+    async def test_posts_and_remembers_when_the_channel_has_nothing(self):
+        interaction = self.command_interaction()
+
+        await bot.panel_command.callback(interaction)
+
+        call = interaction.response.send_message.await_args
+        self.assertIsInstance(call.kwargs.get("view"), bot.CountdownPanel)
+        self.assertFalse(call.kwargs.get("ephemeral", False))
+        self.assertEqual(bot.load_announced(), ({"123": 950}, ["123"]))
+
+    async def test_posts_again_if_the_old_message_was_deleted_by_hand(self):
+        bot.write_json(bot.ANNOUNCED_PATH, {"messages": {"123": 700}, "active": ["123"]})
+        self.channel.missing.add(700)
+        interaction = self.command_interaction()
+
+        await bot.panel_command.callback(interaction)
+
+        self.assertIsInstance(
+            interaction.response.send_message.await_args.kwargs.get("view"), bot.CountdownPanel
+        )
+        self.assertEqual(bot.load_announced(), ({"123": 950}, ["123"]))
+
+    async def test_a_panel_from_the_command_turns_into_goodbye_on_shutdown(self):
+        """/panel で出したパネルも、止まったあとにボタン付きで残らない。"""
+        interaction = self.command_interaction()
+        await bot.panel_command.callback(interaction)
+
+        await self.bell.say_goodbye()
+
+        self.assertEqual([e[0] for e in self.channel.edited], [950])
+        self.assertIsNone(self.channel.edited[0][2])
+
+    async def test_choosing_an_end_keeps_the_standby_line(self):
+        """終わりを選び直しても「待機中です！」の行が消えない。"""
+        interaction = self.command_interaction()
+        interaction.response.edit_message = mock.AsyncMock()
+        select = bot.CountdownPanel().children[0]
+        select._values = ["20"]
+
+        await select.callback(interaction)
+
+        content = interaction.response.edit_message.await_args.kwargs["content"]
+        self.assertIn("待機中", content)
 
 
 class ParseChannelIdsTest(unittest.TestCase):

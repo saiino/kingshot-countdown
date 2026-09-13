@@ -481,7 +481,7 @@ class EndSelect(discord.ui.Select):
         # 文言・選択欄・灰色のボタンを、新しい設定で描き直す。
         # 描き直さないと、Discord側の選択欄は押す前の表示に戻ってしまう。
         await interaction.response.edit_message(
-            content=panel_text(interaction.guild.id),
+            content=panel_text(interaction.guild.id, note=STARTUP_NOTE),
             view=CountdownPanel(current=end),
         )
 
@@ -970,12 +970,44 @@ async def countdown_command(
 @client.tree.command(name="panel", description="カウントダウンのボタンを設置します")
 @app_commands.guild_only()
 async def panel_command(interaction: discord.Interaction):
+    """パネルを出す。チャンネルを荒らさないよう、メッセージは増やさない。
+
+    そのチャンネルにBotの1通（起動時の挨拶や「出陣完了」）があれば、それをパネルに
+    書き換えて、打った人にだけリンクを返す。無ければ新しく出し、以後はそれを
+    そのチャンネルの1通として使い回す（止まるときに「出陣完了」になる）。
+    """
+    guild_id = interaction.guild.id
+    channel = interaction.channel
+    key = str(channel.id)
+    end, _ = end_setting_for(guild_id)
+    content = panel_text(guild_id, note=STARTUP_NOTE)
+    messages, active = load_announced()
+
+    if key in messages:
+        partial = channel.get_partial_message(int(messages[key]))
+        try:
+            await partial.edit(content=content, view=CountdownPanel(current=end))
+        except discord.NotFound:
+            pass  # 手で消されていた。新しく出す
+        except (discord.HTTPException, ValueError, TypeError) as exc:
+            log.warning(f"前回のメッセージを書き換えられませんでした（{messages[key]}）: {exc}。新しく出します")
+        else:
+            log_use(interaction, "パネルを設置（前のメッセージを書き換え）")
+            if key not in active:
+                active.append(key)
+            client.save_announced(messages, active)
+            await interaction.response.send_message(
+                f"パネルはこちらです → {partial.jump_url}", ephemeral=True
+            )
+            return
+
     log_use(interaction, "パネルを設置")
-    end, _ = end_setting_for(interaction.guild.id)
-    await interaction.response.send_message(
-        panel_text(interaction.guild.id),
-        view=CountdownPanel(current=end),
-    )
+    await interaction.response.send_message(content, view=CountdownPanel(current=end))
+    message = await interaction.original_response()
+    messages[key] = message.id
+    if key not in active:
+        active.append(key)
+    client.save_announced(messages, active)
 
 
 @client.tree.command(name="stop", description="再生を止めて退出します")
