@@ -126,7 +126,7 @@ DISCORD_TOKEN=MTIzNDU2Nzg5...
 
 | コマンド | 用途 |
 |---|---|
-| `/panel` | ボタンを設置する。一度打てば以降は押すだけ |
+| `/panel` | ボタンと終わりの秒数の選択欄を設置する。一度打てば以降は押すだけ |
 | `/countdown 開始 終了` | その場で秒数を指定して流す |
 | `/stop` | 再生を止めて退出する |
 
@@ -174,7 +174,7 @@ python src/countdown.py 60 30
 .venv/Scripts/python -m unittest discover -s tests -t .
 ```
 
-70件ほど（2026-09-13時点の参考値。機能を足すたびに増える）。数秒で終わります。
+100件ほど（2026-09-13時点の参考値。機能を足すたびに増える）。数秒で終わります。
 
 | ファイル | 見ているもの | モック |
 |---|---|---|
@@ -208,6 +208,7 @@ python -m unittest tests.test_countdown tests.test_voice_countdown
 | `docs/` | README以外のドキュメント（USAGE / OPERATIONS / NOTES）と画像 |
 | `voice/` | 焼いた音声（生成物。gitには入れない） |
 | `logs/` | 動作の記録（生成物。gitには入れない） |
+| `panel_settings.json` | サーバーごとの終わりの秒数（Botが書く。gitには入れない） |
 
 ### 設定（`.env`）
 
@@ -216,7 +217,7 @@ python -m unittest tests.test_countdown tests.test_voice_countdown
 | `DISCORD_TOKEN` | （必須） | Botのトークン |
 | `VOICEVOX_SPEAKER` | `3` | 話者ID |
 | `VOICEVOX_SPEED` | `1.2` | 話す速さ |
-| `COUNTDOWN_PRESETS` | `45,60,30` | パネルのボタン（最大20個。最下段は停止ボタン） |
+| `COUNTDOWN_PRESETS` | `45,60,30` | パネルのボタン（最大15個。一番上は選択欄、最下段は停止ボタン） |
 | `VOICEVOX_HOST` | `http://127.0.0.1:50021` | VOICEVOXのURL |
 
 前置きの無音と合図は `src/bot.py` 冒頭の `LEAD_SECONDS` / `CUE_TEXT` で変えます。

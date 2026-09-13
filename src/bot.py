@@ -1,8 +1,7 @@
 """出陣ベル — カウントダウンをDiscordのボイスチャンネルで流すBot。
 
     /countdown 45      … その場で秒数を指定して流す
-    /panel             … よく使う秒数のボタンを設置（普段はこっち）
-    /panel_dev         … 【試作】終わりの秒数を選べるパネル
+    /panel             … よく使う秒数のボタンと、終わりの秒数の選択欄を設置（普段はこっち）
     /stop              … 再生を止めて退出
 
 音声は voice_countdown.py が焼いた wav をそのまま流すだけ。
@@ -75,18 +74,16 @@ SPEED = float(ENV.get("VOICEVOX_SPEED", 1.2))
 HOST = ENV.get("VOICEVOX_HOST", vc.DEFAULT_HOST)
 
 # パネルに並べるボタン。
-# Discordは1行5個・最大5行。最下段を停止ボタンに使うので、秒数は4行ぶんまで。
-MAX_BUTTONS = 20
+# Discordは1行5個・最大5行。一番上を終わりの選択欄、最下段を停止ボタンに使うので、
+# 秒数は間の3行ぶんまで。
+MAX_BUTTONS = 15
 PRESETS = [
     int(value)
     for value in ENV.get("COUNTDOWN_PRESETS", "45,60,30").split(",")
     if value.strip()
 ][:MAX_BUTTONS]
 
-# 試作パネル（/panel_dev）: 終わりの秒数を選べる。
-# 選択欄が1行使うので、秒数ボタンは3行ぶんまで。
-DEV_MAX_BUTTONS = 15
-# 5秒刻みで50まで。選択欄に並べられるのは25個まで。
+# 終わりの秒数の選択肢。5秒刻みで50まで。選択欄に並べられるのは25個まで。
 # 開始秒以下を選ぶとそのボタンは数えるものがないので、パネルでは灰色にする。
 END_CHOICES = list(range(0, 55, 5))
 
@@ -153,7 +150,7 @@ def trim_to_end(pcm, end):
     return pcm[: len(pcm) - end * DISCORD_BYTES_PER_SECOND]
 
 
-# ----------------------------------------------------------- 試作パネルの設定
+# ------------------------------------------------------------- 終わりの設定
 
 
 def load_end_settings():
@@ -269,7 +266,7 @@ async def play_countdown(interaction, start, end, reuse_full=False):
     """呼んだ人のいるボイスチャンネルでカウントダウンを流す。
 
     reuse_full=True のときは start→0 を焼いて（焼いてあればそれを使って）、
-    end の手前で切って流す。試作パネルの秒数は start→0 を先に焼いてあるので、
+    end の手前で切って流す。パネルの秒数は start→0 を起動時に焼いてあるので、
     終わりをいくつに変えても待ち時間なしで鳴る。
     /countdown は開始秒が自由なので、今までどおり start→end をそのまま焼く。
     """
@@ -370,72 +367,32 @@ async def stop_playback(interaction, how):
 # --------------------------------------------------------------------- パネル
 
 
-class CountdownButton(discord.ui.Button):
-    def __init__(self, seconds, row=None):
-        super().__init__(
-            label=f"{seconds}秒",
-            style=discord.ButtonStyle.primary,
-            # custom_id を固定しておくと、Bot再起動後もボタンが生き続ける
-            custom_id=f"kingshot:countdown:{seconds}",
-            row=row,
-        )
-        self.seconds = seconds
-
-    async def callback(self, interaction):
-        await play_countdown(interaction, self.seconds, 0)
+# 秒数のボタンと停止ボタンの custom_id は、終わりを選べるようにする前から変えていない。
+# 変えると、各サーバーにすでに貼ってあるパネルが反応しなくなる。
+# 古いパネルには選択欄がないが、ボタンは保存された終わりの設定で動く。
 
 
-class StopButton(discord.ui.Button):
-    def __init__(self, row, custom_id="kingshot:stop"):
-        super().__init__(
-            label="止める",
-            style=discord.ButtonStyle.danger,
-            custom_id=custom_id,
-            row=row,
-        )
-
-    async def callback(self, interaction):
-        await stop_playback(interaction, "ボタン")
-
-
-class CountdownPanel(discord.ui.View):
-    def __init__(self):
-        # timeout=None で、時間が経ってもボタンが死なない
-        super().__init__(timeout=None)
-
-        # 行を明示する。自動配置に任せると停止ボタンが秒数の列に混ざり、
-        # 慌てているときに押し間違える。
-        for index, seconds in enumerate(PRESETS):
-            self.add_item(CountdownButton(seconds, row=index // 5))
-
-        # 秒数が使い切った次の行へ。いちばん下に赤で置く
-        self.add_item(StopButton(row=(len(PRESETS) + 4) // 5))
-
-
-# ------------------------------------------------------ 試作パネル（/panel_dev）
-#
-# 要望: 終わりの秒数を選べるようにしたい。ゴースト部隊の位置で最速の人が変わるため。
-#       止めるボタンは、やり直しですぐ掛け直すことがあるので残す。
-#
-# 終わりは戦闘ごとに決まるもので、1回ごとに変わるものではない。なので押すたびに
-# 選ばせず、パネル上部の選択欄でサーバーごとに一度決めておく形にした。
-# IDは kingshot:dev: で始め、今の /panel とは混ざらないようにしてある。
-
-
-def dev_panel_text(guild_id):
+def panel_text(guild_id):
     end, by = end_setting_for(guild_id)
     who = f"（{by} が変更）" if by else ""
     return (
-        "**出陣カウントダウン（試作）**\n"
+        "**出陣カウントダウン**\n"
         f"いまの設定：**{end} まで**数える{who}\n"
         "ボイスチャンネルに入ってから押してください。"
     )
 
 
 class EndSelect(discord.ui.Select):
+    """何秒まで数えるかを選ぶ。
+
+    要望: 終わりの秒数を選べるようにしたい。ゴースト部隊の位置で最速の人が変わるため。
+    終わりは戦闘ごとに決まるもので、1回ごとに変わるものではない。なので押すたびに
+    選ばせず、パネル上部でサーバーごとに一度決めておく形にした。
+    """
+
     def __init__(self, current=0):
         super().__init__(
-            custom_id="kingshot:dev:end",
+            custom_id="kingshot:end",
             placeholder="終わりの秒数を選ぶ",
             options=[
                 discord.SelectOption(
@@ -456,27 +413,28 @@ class EndSelect(discord.ui.Select):
             return
 
         log_use(interaction, f"終わりを {end} に変更")
-        # 文言と選択欄の表示を、新しい設定に描き直す。
+        # 文言・選択欄・灰色のボタンを、新しい設定で描き直す。
         # 描き直さないと、Discord側の選択欄は押す前の表示に戻ってしまう。
         await interaction.response.edit_message(
-            content=dev_panel_text(interaction.guild.id),
-            view=DevCountdownPanel(current=end),
+            content=panel_text(interaction.guild.id),
+            view=CountdownPanel(current=end),
         )
 
 
-class DevCountdownButton(discord.ui.Button):
+class CountdownButton(discord.ui.Button):
     def __init__(self, seconds, row=None):
         super().__init__(
             label=f"{seconds}秒",
             style=discord.ButtonStyle.primary,
-            custom_id=f"kingshot:dev:countdown:{seconds}",
+            # custom_id を固定しておくと、Bot再起動後もボタンが生き続ける
+            custom_id=f"kingshot:countdown:{seconds}",
             row=row,
         )
         self.seconds = seconds
 
     async def callback(self, interaction):
-        # 押した瞬間の保存値を使う。同じサーバーに試作パネルが2枚あって
-        # 片方の文言が古くなっていても、流れるのは最新の設定。
+        # 押した瞬間の保存値を使う。パネルが2枚あって片方の表示が古くても、
+        # 選択欄のない古いパネルから押されても、流れるのは最新の設定。
         end, _ = end_setting_for(interaction.guild.id)
         if end >= self.seconds:
             log_use(interaction, f"{self.seconds} → {end} は数えられないので中止")
@@ -489,25 +447,41 @@ class DevCountdownButton(discord.ui.Button):
         await play_countdown(interaction, self.seconds, end, reuse_full=True)
 
 
-class DevCountdownPanel(discord.ui.View):
+class StopButton(discord.ui.Button):
+    """要望: 終わりを選べても、やり直しですぐ掛け直すことがあるので残す。"""
+
+    def __init__(self, row):
+        super().__init__(
+            label="止める",
+            style=discord.ButtonStyle.danger,
+            custom_id="kingshot:stop",
+            row=row,
+        )
+
+    async def callback(self, interaction):
+        await stop_playback(interaction, "ボタン")
+
+
+class CountdownPanel(discord.ui.View):
     def __init__(self, current=0):
+        # timeout=None で、時間が経ってもボタンが死なない
         super().__init__(timeout=None)
 
         self.add_item(EndSelect(current))
 
-        # 選択欄が1行目を使うので、秒数は2行目から。上限で切っておかないと
-        # 行が溢れて、起動時の登録で落ちる。
-        presets = PRESETS[:DEV_MAX_BUTTONS]
+        # 行を明示する。自動配置に任せると停止ボタンが秒数の列に混ざり、
+        # 慌てているときに押し間違える。選択欄が1行目なので、秒数は2行目から。
+        # 上限で切っておかないと行が溢れて、起動時の登録で落ちる。
+        presets = PRESETS[:MAX_BUTTONS]
         for index, seconds in enumerate(presets):
-            button = DevCountdownButton(seconds, row=1 + index // 5)
+            button = CountdownButton(seconds, row=1 + index // 5)
             # 終わり以下の秒数は数えるものがないので押せなくする。
             # 表示が古いパネルから押された場合に備えて、callback 側でも断っている。
             button.disabled = seconds <= current
             self.add_item(button)
 
-        self.add_item(
-            StopButton(row=1 + (len(presets) + 4) // 5, custom_id="kingshot:dev:stop")
-        )
+        # 秒数が使い切った次の行へ。いちばん下に赤で置く
+        self.add_item(StopButton(row=1 + (len(presets) + 4) // 5))
 
 
 # ------------------------------------------------------------------- Bot本体
@@ -523,7 +497,6 @@ class ShutsujinBell(discord.Client):
     async def setup_hook(self):
         # 再起動しても既存のパネルのボタンが反応するように登録し直す
         self.add_view(CountdownPanel())
-        self.add_view(DevCountdownPanel())
 
     async def on_ready(self):
         # on_ready は起動時だけでなく、再接続のたびに呼ばれる。
@@ -599,22 +572,10 @@ async def countdown_command(
 @app_commands.guild_only()
 async def panel_command(interaction: discord.Interaction):
     log_use(interaction, "パネルを設置")
-    await interaction.response.send_message(
-        "**出陣カウントダウン**\nボイスチャンネルに入ってから押してください。",
-        view=CountdownPanel(),
-    )
-
-
-@client.tree.command(
-    name="panel_dev", description="【試作】終わりの秒数を選べるパネルを設置します"
-)
-@app_commands.guild_only()
-async def panel_dev_command(interaction: discord.Interaction):
-    log_use(interaction, "試作パネルを設置")
     end, _ = end_setting_for(interaction.guild.id)
     await interaction.response.send_message(
-        dev_panel_text(interaction.guild.id),
-        view=DevCountdownPanel(current=end),
+        panel_text(interaction.guild.id),
+        view=CountdownPanel(current=end),
     )
 
 

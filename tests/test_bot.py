@@ -402,17 +402,17 @@ class CommandRegistrationTest(unittest.TestCase):
         self.assertEqual(last[0]["custom_id"], "kingshot:stop")
         self.assertEqual(last[0]["style"], discord.ButtonStyle.danger.value, "赤")
 
-        # 秒数のボタンは青のまま
-        for row in rows[:-1]:
+        # 秒数のボタンは青のまま（1行目は終わりの選択欄）
+        for row in rows[1:-1]:
             for component in row["components"]:
                 self.assertEqual(
                     component["style"], discord.ButtonStyle.primary.value
                 )
 
     def test_presets_leave_room_for_the_stop_row(self):
-        """上限まで並べても、停止ボタンのぶんの行が残ること。"""
-        self.assertLessEqual(bot.MAX_BUTTONS, 20)
-        self.assertLessEqual((bot.MAX_BUTTONS + 4) // 5, 4)
+        """上限まで並べても、選択欄と停止ボタンのぶんの行が残ること。"""
+        self.assertLessEqual(bot.MAX_BUTTONS, 15)
+        self.assertLessEqual((bot.MAX_BUTTONS + 4) // 5, 3)
 
     def test_panel_fits_within_discord_limits(self):
         """1行5個・最大5行を超えると、送信時に弾かれる。"""
@@ -435,7 +435,7 @@ class CommandRegistrationTest(unittest.TestCase):
         self.assertLessEqual(bot.MAX_BUTTONS, 25)
 
 
-# ------------------------------------------------------------ 試作パネル（/panel_dev）
+# ------------------------------------------------------------ 終わりの秒数を選べるパネル
 
 
 def make_stereo_marker_wav(seconds):
@@ -553,17 +553,17 @@ class EndSettingTest(unittest.TestCase):
         self.assertEqual(os.listdir(self.tmp.name), ["panel_settings.json"])
 
 
-class DevPanelLayoutTest(unittest.TestCase):
+class EndSelectPanelLayoutTest(unittest.TestCase):
     def test_end_choices_come_first(self):
-        rows = bot.DevCountdownPanel().to_components()
+        rows = bot.CountdownPanel().to_components()
         first = rows[0]["components"]
         self.assertEqual(len(first), 1)
-        self.assertEqual(first[0]["custom_id"], "kingshot:dev:end")
+        self.assertEqual(first[0]["custom_id"], "kingshot:end")
         values = [int(option["value"]) for option in first[0]["options"]]
         self.assertEqual(values, bot.END_CHOICES)
 
     def test_current_value_is_shown_as_selected(self):
-        select = bot.DevCountdownPanel(current=20).children[0]
+        select = bot.CountdownPanel(current=20).children[0]
         chosen = [o.value for o in select.options if o.default]
         self.assertEqual(chosen, ["20"])
 
@@ -575,57 +575,49 @@ class DevPanelLayoutTest(unittest.TestCase):
     def test_buttons_that_cannot_count_are_greyed_out(self):
         """終わりが50なら、40・45・50秒は数えるものがない。押せなくしておく。"""
         with mock.patch.object(bot, "PRESETS", [80, 55, 50, 45, 40]):
-            panel = bot.DevCountdownPanel(current=50)
+            panel = bot.CountdownPanel(current=50)
 
         state = {
             b.seconds: b.disabled
-            for b in panel.children if isinstance(b, bot.DevCountdownButton)
+            for b in panel.children if isinstance(b, bot.CountdownButton)
         }
         self.assertEqual(state, {80: False, 55: False, 50: True, 45: True, 40: True})
         self.assertFalse(panel.children[-1].disabled, "止めるは常に押せる")
 
     def test_nothing_is_greyed_out_when_counting_to_zero(self):
-        panel = bot.DevCountdownPanel()
+        panel = bot.CountdownPanel()
         self.assertFalse(any(getattr(c, "disabled", False) for c in panel.children))
 
     def test_stop_button_sits_alone_on_the_last_row(self):
         """要望: 終わりを選べても、やり直し用に止めるボタンは残す。"""
-        last = bot.DevCountdownPanel().to_components()[-1]["components"]
+        last = bot.CountdownPanel().to_components()[-1]["components"]
         self.assertEqual(len(last), 1)
-        self.assertEqual(last[0]["custom_id"], "kingshot:dev:stop")
+        self.assertEqual(last[0]["custom_id"], "kingshot:stop")
         self.assertEqual(last[0]["style"], discord.ButtonStyle.danger.value)
 
     def test_fits_within_discord_limits_even_with_many_presets(self):
         with mock.patch.object(bot, "PRESETS", list(range(100, 80, -1))):
-            rows = bot.DevCountdownPanel().to_components()
+            rows = bot.CountdownPanel().to_components()
         self.assertLessEqual(len(rows), 5)
         for row in rows:
             self.assertLessEqual(len(row["components"]), 5)
 
-    def test_ids_do_not_collide_with_the_current_panel(self):
-        """試作を貼っても、今のパネルのボタンの動きは変わらない。"""
-        current = {c.custom_id for c in bot.CountdownPanel().children}
-        dev = {c.custom_id for c in bot.DevCountdownPanel().children}
-        self.assertFalse(current & dev)
-        for custom_id in dev:
-            self.assertTrue(custom_id.startswith("kingshot:dev:"), custom_id)
+    def test_already_posted_panels_keep_working(self):
+        """ボタンのIDは終わりを選べるようにする前と同じ。変えると貼ってあるパネルが死ぬ。"""
+        with mock.patch.object(bot, "PRESETS", [80, 40]):
+            ids = {c.custom_id for c in bot.CountdownPanel().children}
+        self.assertEqual(
+            ids,
+            {"kingshot:end", "kingshot:countdown:80", "kingshot:countdown:40", "kingshot:stop"},
+        )
 
     def test_stays_alive_after_restart(self):
-        panel = bot.DevCountdownPanel()
+        panel = bot.CountdownPanel()
         self.assertIsNone(panel.timeout)
         self.assertTrue(panel.is_persistent())
 
-    def test_current_panel_is_unchanged(self):
-        """/panel は触っていない。行と並びが元のまま。"""
-        rows = bot.CountdownPanel().to_components()
-        self.assertEqual(rows[-1]["components"][0]["custom_id"], "kingshot:stop")
-        self.assertTrue(
-            all(c["type"] == discord.ComponentType.button.value
-                for row in rows for c in row["components"])
-        )
 
-
-class DevPanelBehaviourTest(unittest.IsolatedAsyncioTestCase):
+class EndSelectBehaviourTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         import tempfile
 
@@ -646,8 +638,8 @@ class DevPanelBehaviourTest(unittest.IsolatedAsyncioTestCase):
 
     def button(self, seconds):
         return next(
-            b for b in bot.DevCountdownPanel().children
-            if getattr(b, "custom_id", "") == f"kingshot:dev:countdown:{seconds}"
+            b for b in bot.CountdownPanel().children
+            if getattr(b, "custom_id", "") == f"kingshot:countdown:{seconds}"
         )
 
     async def test_button_uses_the_saved_end(self):
@@ -685,7 +677,7 @@ class DevPanelBehaviourTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_choosing_an_end_saves_it_and_redraws_the_panel(self):
         interaction = self.interaction()
-        select = bot.DevCountdownPanel().children[0]
+        select = bot.CountdownPanel().children[0]
         select._values = ["20"]
 
         with self.assertLogs("bell", level="INFO") as captured:
@@ -702,7 +694,7 @@ class DevPanelBehaviourTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_says_so_when_the_setting_cannot_be_saved(self):
         interaction = self.interaction()
-        select = bot.DevCountdownPanel().children[0]
+        select = bot.CountdownPanel().children[0]
         select._values = ["20"]
 
         with mock.patch.object(bot, "save_end_setting", side_effect=OSError("書けない")):
@@ -715,7 +707,7 @@ class DevPanelBehaviourTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_stop_button_logs_like_the_current_one(self):
         interaction = make_interaction(playing=True)
-        stop = bot.DevCountdownPanel().children[-1]
+        stop = bot.CountdownPanel().children[-1]
 
         with self.assertLogs("bell", level="INFO") as captured:
             await stop.callback(interaction)
@@ -725,7 +717,7 @@ class DevPanelBehaviourTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ReuseFullAudioTest(unittest.IsolatedAsyncioTestCase):
-    """試作パネルは start→0 を焼いて、それを切って流す。"""
+    """パネルのボタンは start→0 を焼いて、それを切って流す。"""
 
     async def test_bakes_to_zero_and_plays_the_trimmed_length(self):
         baked = []
