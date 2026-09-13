@@ -3,15 +3,15 @@
 argparse を使わないと何を自分でやることになるのかを見るためのもの。
 実運用は countdown.py のほうを使う。
 
-    python countdown_argv.py 45
-    python countdown_argv.py 60 30
+    python src/countdown_argv.py 45
+    python src/countdown_argv.py 60 30
 """
 
 import sys
 
 from countdown import build_schedule, run
 
-USAGE = "使い方: python countdown_argv.py [開始秒] [終了秒]"
+USAGE = "使い方: python src/countdown_argv.py [開始秒] [終了秒]"
 
 
 def main():

@@ -8,7 +8,7 @@
 Discordのボイスは 48kHz・ステレオ・16bit しか受け取らないが、
 VOICEVOXに最初からその形式で出させているので変換処理は要らない。
 
-    .venv\\Scripts\\python bot.py
+    .venv\\Scripts\\python src\\bot.py
 """
 
 import asyncio
@@ -27,7 +27,9 @@ from discord import app_commands
 import voice_countdown as vc
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LOG_DIR = os.path.join(HERE, "logs")
+# ソースは src/ に置いてあるが、.env と logs/ はリポジトリ直下にある。
+ROOT = os.path.dirname(HERE)
+LOG_DIR = os.path.join(ROOT, "logs")
 
 # ログは起動した日ごとに1本。日付をまたいでも切り替えない。
 # 土19時〜日3時のように夜をまたぐ運用で、1回ぶんが1ファイルに収まる。
@@ -63,7 +65,7 @@ def load_env(path):
     return values
 
 
-ENV = load_env(os.path.join(HERE, ".env"))
+ENV = load_env(os.path.join(ROOT, ".env"))
 
 TOKEN = ENV.get("DISCORD_TOKEN", "")
 SPEAKER = int(ENV.get("VOICEVOX_SPEAKER", 3))

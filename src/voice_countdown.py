@@ -8,10 +8,10 @@ VOICEVOX で「45」「44」…「0」の音声を作り、無音を挟んで
 前提: VOICEVOX（またはVOICEVOX ENGINE）をローカルで起動しておくこと。
       起動していると http://127.0.0.1:50021 で HTTP API が待ち受ける。
 
-    python voice_countdown.py --list-speakers   # 話者一覧を見る
-    python voice_countdown.py 45 0              # 音声を作る（キャッシュされる）
-    python voice_countdown.py 45 0 --play       # 作って再生（2回目以降は再生だけ）
-    python voice_countdown.py 60 30 --speaker 3 --speed 1.2 --lead 3 --cue よーい
+    python src/voice_countdown.py --list-speakers   # 話者一覧を見る
+    python src/voice_countdown.py 45 0              # 音声を作る（キャッシュされる）
+    python src/voice_countdown.py 45 0 --play       # 作って再生（2回目以降は再生だけ）
+    python src/voice_countdown.py 60 30 --speaker 3 --speed 1.2 --lead 3 --cue よーい
 """
 
 import argparse
@@ -29,7 +29,9 @@ import wave
 from countdown import build_schedule
 
 DEFAULT_HOST = "http://127.0.0.1:50021"
-CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice")
+# ソースは src/ にあるが、焼いた音声はリポジトリ直下の voice/ に置く。
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CACHE_DIR = os.path.join(ROOT, "voice")
 
 # 数字をそのまま渡すと読みが不自然になるものだけ、ひらがなで上書きする。
 READINGS = {0: "ゼロ"}
