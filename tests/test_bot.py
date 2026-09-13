@@ -849,7 +849,7 @@ class StartupPanelTest(AnnounceTestBase):
         self.assertIn("待機中", content)
         self.assertIn("ボイスチャンネルに入ってから", content)
         self.assertIsInstance(view, bot.CountdownPanel)
-        self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {"123": 901})
+        self.assertEqual(bot.load_announced(), ({"123": 901}, ["123"]))
 
     async def test_panel_follows_the_saved_end(self):
         bot.save_end_setting(111, 40, "nori_26523")
@@ -863,18 +863,23 @@ class StartupPanelTest(AnnounceTestBase):
                     if isinstance(b, bot.CountdownButton)}
         self.assertEqual(disabled, {45: False, 40: True})
 
-    async def test_replaces_the_panel_from_last_time(self):
-        """毎週貼るたびに溜まっていかないこと。"""
+    async def test_reuses_the_message_from_last_time(self):
+        """チャンネルを荒らさないよう、送り直さずに前回のメッセージを書き換える。"""
         bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
         self.channels("123")
 
         await self.bell.post_startup_panels()
 
-        self.assertEqual(self.channel.deleted, [555])
-        self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {"123": 901})
+        self.assertEqual(self.channel.sent, [], "新しく送らない")
+        self.assertEqual(self.channel.deleted, [], "消さない")
+        message_id, content, view = self.channel.edited[0]
+        self.assertEqual(message_id, 555)
+        self.assertIn("待機中", content)
+        self.assertIsInstance(view, bot.CountdownPanel)
+        self.assertEqual(bot.load_announced(), ({"123": 555}, ["123"]))
 
-    async def test_clears_last_weeks_panel_from_a_channel_not_used_this_week(self):
-        """鯖戦の週に493へ貼ったものが、次の週に残り続けないこと。"""
+    async def test_leaves_a_channel_not_used_tonight_alone(self):
+        """鯖戦の夜に493で使ったメッセージは、次の週は「出陣完了」のまま触らない。"""
         last_week = FakeChannel(channel_id=777, guild_id=493)
         self.bell.get_channel = {123: self.channel, 777: last_week}.get
         bot.write_json(bot.ANNOUNCED_PATH, {"777": 555})
@@ -882,18 +887,17 @@ class StartupPanelTest(AnnounceTestBase):
 
         await self.bell.post_startup_panels()
 
-        self.assertEqual(last_week.deleted, [555])
-        self.assertEqual(last_week.sent, [])
-        self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {"123": 901})
+        self.assertEqual((last_week.sent, last_week.edited, last_week.deleted), ([], [], []))
+        self.assertEqual(bot.load_announced(), ({"777": 555, "123": 901}, ["123"]))
 
-    async def test_old_records_are_cleared_even_when_nothing_is_posted(self):
+    async def test_nothing_to_show_keeps_old_messages_but_marks_them_unused(self):
         bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
         self.channels("")
 
         await self.bell.post_startup_panels()
 
-        self.assertEqual(self.channel.deleted, [555])
-        self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {})
+        self.assertEqual((self.channel.edited, self.channel.deleted), ([], []))
+        self.assertEqual(bot.load_announced(), ({"123": 555}, []))
 
     async def test_posts_to_the_battle_channel_on_a_battle_night(self):
         from datetime import datetime
@@ -910,7 +914,7 @@ class StartupPanelTest(AnnounceTestBase):
         self.assertEqual(len(war.sent), 1)
         self.assertEqual(len(self.channel.sent), 1, "毎週のチャンネルにも貼る")
         self.assertIn("今夜（10/10）は鯖戦", "\n".join(captured.output))
-        self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {"123": 901, "222": 901})
+        self.assertEqual(bot.load_announced(), ({"123": 901, "222": 901}, ["123", "222"]))
 
     async def test_skips_the_battle_channel_the_day_after(self):
         """鯖戦が終わった日曜の昼に起動しても、ゲーム用のサーバーには貼らない。"""
@@ -963,7 +967,8 @@ class StartupPanelTest(AnnounceTestBase):
         self.assertIn("パネルは493のサーバーに置いてあります", content)
         self.assertNotIn("テストサーバー", content, "テストサーバーの名前は出さない")
         self.assertEqual(
-            bot.read_json(bot.ANNOUNCED_PATH), {"123": 901, "222": 901, "333": 901}
+            bot.load_announced(),
+            ({"123": 901, "222": 901, "333": 901}, ["123", "222", "333"]),
         )
 
     async def test_does_not_greet_the_shared_server_on_a_domestic_night(self):
@@ -995,6 +1000,21 @@ class StartupPanelTest(AnnounceTestBase):
         self.assertEqual(len(jyp.edited), 1)
         self.assertIn("出陣完了", jyp.edited[0][1])
 
+    async def test_same_message_switches_between_panel_and_greeting(self):
+        """JYPは国内戦の夜はパネル、鯖戦の夜は挨拶。どちらも同じ1通を書き換える。"""
+        from datetime import datetime
+
+        war, jyp = self.battle_channels()
+        bot.write_json(bot.ANNOUNCED_PATH, {"333": 700})
+
+        await self.bell.post_startup_panels(now=datetime(2026, 10, 10, 19, 0))
+
+        self.assertEqual(jyp.sent, [])
+        message_id, content, view = jyp.edited[0]
+        self.assertEqual(message_id, 700)
+        self.assertIn("/panel", content)
+        self.assertIsNone(view, "挨拶に書き換えるときはボタンを外す")
+
     async def test_old_panel_deleted_by_hand_is_fine(self):
         bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
         self.channel.missing.add(555)
@@ -1003,6 +1023,7 @@ class StartupPanelTest(AnnounceTestBase):
         await self.bell.post_startup_panels()
 
         self.assertEqual(len(self.channel.sent), 1)
+        self.assertEqual(bot.load_announced(), ({"123": 901}, ["123"]))
 
     async def test_missing_permission_is_reported_not_crashed(self):
         self.channel.send_error = http_error(discord.Forbidden, 403)
@@ -1012,7 +1033,7 @@ class StartupPanelTest(AnnounceTestBase):
             await self.bell.post_startup_panels()
 
         self.assertIn("メッセージを送信", "\n".join(captured.output))
-        self.assertNotIn("123", bot.read_json(bot.ANNOUNCED_PATH))
+        self.assertNotIn("123", bot.load_announced()[0])
 
     async def test_unknown_channel_is_skipped(self):
         self.channels("999, 123")
@@ -1032,7 +1053,7 @@ class StartupPanelTest(AnnounceTestBase):
         with self.assertLogs("bell", level="WARNING"):
             await self.bell.post_startup_panels()
 
-        self.assertFalse(os.path.exists(bot.ANNOUNCED_PATH) and bot.read_json(bot.ANNOUNCED_PATH))
+        self.assertEqual(bot.load_announced(), ({}, []))
 
 
 class BattleWeekTest(unittest.TestCase):
@@ -1134,6 +1155,39 @@ class HelloTest(unittest.TestCase):
         self.assertNotIn("-#", bot.hello_text("鯖戦", []))
 
 
+class LoadAnnouncedTest(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.object(
+            bot, "ANNOUNCED_PATH", os.path.join(self.tmp.name, "announced_panels.json")
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_reads_the_old_format_as_all_in_use(self):
+        """形式を変える前に保存された記録も、そのまま使える。"""
+        bot.write_json(bot.ANNOUNCED_PATH, {"123": 555, "777": 556})
+        self.assertEqual(bot.load_announced(), ({"123": 555, "777": 556}, ["123", "777"]))
+
+    def test_reads_the_new_format(self):
+        bot.write_json(bot.ANNOUNCED_PATH, {"messages": {"123": 555, "777": 556}, "active": ["777"]})
+        self.assertEqual(bot.load_announced(), ({"123": 555, "777": 556}, ["777"]))
+
+    def test_broken_record_is_treated_as_empty(self):
+        bot.write_json(bot.ANNOUNCED_PATH, {"messages": "x", "active": "y"})
+        self.assertEqual(bot.load_announced(), ({}, []))
+
+    def test_active_entries_without_a_message_are_dropped(self):
+        bot.write_json(bot.ANNOUNCED_PATH, {"messages": {"123": 555}, "active": ["123", "999"]})
+        self.assertEqual(bot.load_announced(), ({"123": 555}, ["123"]))
+
+    def test_missing_file_is_empty(self):
+        self.assertEqual(bot.load_announced(), ({}, []))
+
+
 class ParseChannelIdsTest(unittest.TestCase):
     def test_reads_comma_separated_ids(self):
         self.assertEqual(bot.parse_channel_ids("123, 456,,"), [123, 456])
@@ -1171,6 +1225,17 @@ class GoodbyeTest(AnnounceTestBase):
 
         with self.assertLogs("bell", level="WARNING"):
             await self.bell.say_goodbye()
+
+    async def test_only_the_channels_used_tonight_are_rewritten(self):
+        """使っていないチャンネルの「出陣完了」まで書き換えると、停止時刻だけ毎週変わる。"""
+        idle = FakeChannel(channel_id=777, guild_id=493)
+        self.bell.get_channel = {123: self.channel, 777: idle}.get
+        bot.write_json(bot.ANNOUNCED_PATH, {"messages": {"123": 555, "777": 556}, "active": ["123"]})
+
+        await self.bell.say_goodbye()
+
+        self.assertEqual([e[0] for e in self.channel.edited], [555])
+        self.assertEqual(idle.edited, [])
 
     async def test_nothing_posted_means_nothing_to_do(self):
         await self.bell.say_goodbye()

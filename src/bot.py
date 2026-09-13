@@ -206,6 +206,26 @@ def write_json(path, data):
     os.replace(tmp, path)
 
 
+def load_announced():
+    """起動時に出したメッセージの記録を読む。
+
+    返り値は (チャンネルID → メッセージID, その夜に使ったチャンネルID の並び)。
+    以前の形式 {チャンネルID: メッセージID} も読める（そのときは全部を使用中とみなす）。
+    """
+    data = read_json(ANNOUNCED_PATH)
+    if "messages" in data:
+        raw = data.get("messages")
+        messages = raw if isinstance(raw, dict) else {}
+        raw_active = data.get("active")
+        active = raw_active if isinstance(raw_active, list) else []
+    else:
+        messages = data
+        active = list(data)
+    messages = {str(k): v for k, v in messages.items() if str(k).isdigit()}
+    active = [str(k) for k in active if str(k) in messages]
+    return messages, active
+
+
 def load_end_settings():
     """サーバーごとの終わりの設定を読む。"""
     return read_json(SETTINGS_PATH)
@@ -732,56 +752,49 @@ class ShutsujinBell(discord.Client):
     # ------------------------------------------------------ 起動時のパネル
 
     async def post_startup_panels(self, now=None):
-        """その週に貼るべきチャンネルにパネルを貼る。
+        """その夜に使うチャンネルに、パネルか挨拶を出す。
 
-        前回の起動で貼ったものは、今回も同じ場所に貼るかどうかに関係なく全部消す。
-        週によって貼る場所が変わるので、今回のリストだけを見て消すと、
-        先週の場所に「出陣完了」のパネルが残り続けてしまう。
-        新しく貼れば一番下に出るので、チャットが流れていても見つけやすい。
+        チャンネルを荒らさないよう、メッセージは増やさない。前回の起動で出した
+        メッセージがあればそれを書き換えて使い回し、無ければ（手で消されていたら）
+        新しく送る。その夜に使わないチャンネルのメッセージは「出陣完了」のまま触らない。
         """
         now = now or datetime.now()
         kind, channel_ids = channel_ids_for(now)
+        hello_ids = hello_channel_ids_for(kind, channel_ids)
         if BATTLE_ANCHOR_DATE.strip():
             if kind:
-                log.info(f"今夜（{battle_night(now):%m/%d}）は{kind}。{kind}のチャンネルにも貼ります")
+                log.info(f"今夜（{battle_night(now):%m/%d}）は{kind}。{kind}のチャンネルにも出します")
             else:
-                log.info("戦闘の夜ではないので、毎週のチャンネルだけに貼ります")
+                log.info("戦闘の夜ではないので、毎週のチャンネルだけに出します")
 
-        hello_ids = hello_channel_ids_for(kind, channel_ids)
-        posted = read_json(ANNOUNCED_PATH)
-        if not channel_ids and not hello_ids and not posted:
+        messages, _ = load_announced()
+        if not channel_ids and not hello_ids:
+            if messages:
+                # どこにも出さない夜。止まるときに書き換える対象も無し
+                self.save_announced(messages, [])
             return
-
-        for key, old_id in posted.items():
-            if not str(key).isdigit():
-                continue
-            channel = await self.find_channel(int(key))
-            if channel is not None:
-                await self.delete_quietly(channel, old_id)
 
         battle_ids = battle_channel_ids(kind)
         places = []
-        fresh = {}
+        active = []
+
         for channel_id in channel_ids:
             channel = await self.find_channel(channel_id)
             if channel is None:
                 continue
-
             end, _ = end_setting_for(channel.guild.id)
-            try:
-                message = await channel.send(
-                    panel_text(channel.guild.id, note=STARTUP_NOTE),
-                    view=CountdownPanel(current=end),
-                )
-            except discord.HTTPException as exc:
-                log.warning(
-                    f"パネルを貼れませんでした「{channel.name}」: {exc}"
-                    "（そのチャンネルでBotに「チャンネルを見る」「メッセージを送信」の権限があるか確認）"
-                )
+            key = str(channel_id)
+            message_id = await self.show(
+                channel,
+                messages.get(key),
+                panel_text(channel.guild.id, note=STARTUP_NOTE),
+                CountdownPanel(current=end),
+                "パネル",
+            )
+            if message_id is None:
                 continue
-
-            fresh[str(channel_id)] = message.id
-            log.info(f"パネルを貼りました「{channel.guild.name} / {channel.name}」")
+            messages[key] = message_id
+            active.append(key)
             # 挨拶に「パネルはどこにあるか」を書くため。毎週のチャンネル（テストサーバー）は含めない
             name = channel.guild.name
             if channel_id in battle_ids and name and name not in places:
@@ -791,20 +804,20 @@ class ShutsujinBell(discord.Client):
             channel = await self.find_channel(channel_id)
             if channel is None:
                 continue
-            try:
-                message = await channel.send(
-                    hello_text(kind, places, self.panel_command_mention(channel.guild.id))
-                )
-            except discord.HTTPException as exc:
-                log.warning(
-                    f"挨拶を出せませんでした「{channel.name}」: {exc}"
-                    "（そのチャンネルでBotに「チャンネルを見る」「メッセージを送信」の権限があるか確認）"
-                )
+            key = str(channel_id)
+            message_id = await self.show(
+                channel,
+                messages.get(key),
+                hello_text(kind, places, self.panel_command_mention(channel.guild.id)),
+                None,
+                "挨拶",
+            )
+            if message_id is None:
                 continue
-            fresh[str(channel_id)] = message.id
-            log.info(f"挨拶しました「{channel.guild.name} / {channel.name}」")
+            messages[key] = message_id
+            active.append(key)
 
-        self.save_announced(fresh)
+        self.save_announced(messages, active)
 
     def panel_command_mention(self, guild_id):
         """そのサーバーの /panel を押せるリンクにする。IDが分からなければ None。"""
@@ -825,19 +838,41 @@ class ShutsujinBell(discord.Client):
             return None
         return channel
 
-    async def delete_quietly(self, channel, message_id):
-        try:
-            await channel.get_partial_message(int(message_id)).delete()
-        except discord.NotFound:
-            pass  # 手で消されていた
-        except (discord.HTTPException, ValueError, TypeError) as exc:
-            log.warning(f"前回のパネルを消せませんでした（{message_id}）: {exc}")
+    async def show(self, channel, message_id, content, view, what):
+        """前回のメッセージがあれば書き換え、無ければ新しく送る。
 
-    def save_announced(self, posted):
+        返り値は使ったメッセージのID。出せなかったときは None。
+        view=None を渡すとボタンを外す（挨拶はボタン無し）。
+        """
+        if message_id is not None:
+            try:
+                await channel.get_partial_message(int(message_id)).edit(content=content, view=view)
+                log.info(f"{what}に書き換えました「{channel.guild.name} / {channel.name}」")
+                return int(message_id)
+            except discord.NotFound:
+                pass  # 手で消されていた。新しく送る
+            except (discord.HTTPException, ValueError, TypeError) as exc:
+                log.warning(f"前回のメッセージを書き換えられませんでした（{message_id}）: {exc}。新しく送ります")
+
         try:
-            write_json(ANNOUNCED_PATH, posted)
+            if view is None:
+                message = await channel.send(content)
+            else:
+                message = await channel.send(content, view=view)
+        except discord.HTTPException as exc:
+            log.warning(
+                f"{what}を出せませんでした「{channel.name}」: {exc}"
+                "（そのチャンネルでBotに「チャンネルを見る」「メッセージを送信」の権限があるか確認）"
+            )
+            return None
+        log.info(f"{what}を送りました「{channel.guild.name} / {channel.name}」")
+        return message.id
+
+    def save_announced(self, messages, active):
+        try:
+            write_json(ANNOUNCED_PATH, {"messages": messages, "active": active})
         except OSError as exc:
-            log.warning(f"貼ったパネルの記録を保存できませんでした: {exc}")
+            log.warning(f"出したメッセージの記録を保存できませんでした: {exc}")
 
     # ---------------------------------------------------------- 止まるとき
 
@@ -862,10 +897,14 @@ class ShutsujinBell(discord.Client):
         """起動時に貼ったパネルを「出陣完了」に書き換えて、ボタンを外す。
 
         停止中に古いボタンが押されて「応答しませんでした」になるのを防ぐ。
-        メッセージは消さずに残し、次の起動で消して貼り直す。
+        メッセージは残しておき、次の起動でパネルや挨拶に書き戻す。
+        書き換えるのはその夜に使ったチャンネルだけ。使っていないチャンネルの
+        「出陣完了」まで毎回書き換えると、止まった時刻だけが毎週変わってしまう。
         """
         text = goodbye_text()
-        for key, message_id in read_json(ANNOUNCED_PATH).items():
+        messages, active = load_announced()
+        for key in active:
+            message_id = messages.get(key)
             try:
                 channel = await self.find_channel(int(key))
                 if channel is None:
