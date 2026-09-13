@@ -10,5 +10,9 @@ logs/
 # 生成した音声（作り直せるのでコミットしない）
 voice/*.wav
 
+# サーバーごとのパネル設定（Botが書き換える）
+panel_settings.json
+panel_settings.json.tmp
+
 __pycache__/
 *.pyc

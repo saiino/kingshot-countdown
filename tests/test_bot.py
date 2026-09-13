@@ -12,6 +12,7 @@ Discordに繋がずに確かめたいので、interaction（コマンドが叩�
 
 import asyncio
 import io
+import json
 import os
 import sys
 import unittest
@@ -432,6 +433,311 @@ class CommandRegistrationTest(unittest.TestCase):
             ][: bot.MAX_BUTTONS]
         self.assertEqual(len(values), bot.MAX_BUTTONS)
         self.assertLessEqual(bot.MAX_BUTTONS, 25)
+
+
+# ------------------------------------------------------------ 試作パネル（/panel_dev）
+
+
+def make_stereo_marker_wav(seconds):
+    """48kHz・ステレオで、全サンプルが同じ非ゼロ値の音。
+
+    位置の検証なので無音と見分けがつく値にしておく（サイン波は sin(0)=0 で紛れる）。
+    """
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as writer:
+        writer.setnchannels(2)
+        writer.setsampwidth(2)
+        writer.setframerate(48000)
+        writer.writeframes(b"\x39\x30" * int(48000 * seconds) * 2)
+    return buffer.getvalue()
+
+
+class TrimToEndTest(unittest.TestCase):
+    """start→0 を切って使ったものが、start→end を焼いたものと同じになるか。"""
+
+    def build(self, tmpdir, start, end, cue_seconds=None):
+        from types import SimpleNamespace
+
+        args = SimpleNamespace(
+            start=start, end=end, step=1, dense=0, speaker=3, speed=1.2,
+            lead=bot.LEAD_SECONDS, cue="よーい" if cue_seconds else "",
+            host="http://x", sample_rate=48000, stereo=True,
+        )
+
+        def fake_synthesize(host, text, *rest, **kwargs):
+            if text == "よーい":
+                return make_stereo_marker_wav(cue_seconds)
+            return make_stereo_marker_wav(0.4)
+
+        path = os.path.join(tmpdir, f"{start}-{end}.wav")
+        with mock.patch.object(vc, "synthesize", fake_synthesize):
+            with mock.patch("builtins.print"):
+                vc.build_countdown_wav(path, args)
+        return bot.read_pcm(path)
+
+    def test_matches_a_freshly_built_range(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            full = self.build(tmpdir, 8, 0)
+            for end in range(1, 8):
+                with self.subTest(end=end):
+                    self.assertEqual(
+                        bot.trim_to_end(full, end), self.build(tmpdir, 8, end)
+                    )
+
+    def test_still_matches_when_the_cue_stretches_the_lead(self):
+        """合図が長いと lead が伸びる。後ろから削るので、それでも一致するはず。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            full = self.build(tmpdir, 6, 0, cue_seconds=3.5)
+            part = self.build(tmpdir, 6, 2, cue_seconds=3.5)
+
+        self.assertEqual(bot.trim_to_end(full, 2), part)
+
+    def test_zero_leaves_the_audio_untouched(self):
+        pcm = b"\x01\x02\x03\x04" * 1000
+        self.assertIs(bot.trim_to_end(pcm, 0), pcm)
+
+    def test_cuts_on_a_frame_boundary(self):
+        """4バイト（16bit×2ch）の途中で切ると、雑音になる。"""
+        pcm = b"\x00" * (ONE_SECOND * 10)
+        self.assertEqual(len(bot.trim_to_end(pcm, 3)) % 4, 0)
+
+
+class EndSettingTest(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = os.path.join(self.tmp.name, "panel_settings.json")
+        patcher = mock.patch.object(bot, "SETTINGS_PATH", self.path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_unset_means_count_to_zero(self):
+        """初めて使うサーバーでは、今の /panel と同じ動きになる。"""
+        self.assertEqual(bot.end_setting_for(111), (0, None))
+
+    def test_saved_value_is_read_back(self):
+        bot.save_end_setting(111, 20, "dentam6626")
+        self.assertEqual(bot.end_setting_for(111), (20, "dentam6626"))
+
+    def test_each_server_keeps_its_own_value(self):
+        bot.save_end_setting(111, 20, "a")
+        bot.save_end_setting(222, 10, "b")
+        self.assertEqual(bot.end_setting_for(111)[0], 20)
+        self.assertEqual(bot.end_setting_for(222)[0], 10)
+
+    def test_survives_a_restart(self):
+        """メモリではなくファイルに持っているので、読み直しても残っている。"""
+        bot.save_end_setting(111, 25, "a")
+        with open(self.path, encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle)["111"]["end"], 25)
+
+    def test_broken_file_falls_back_instead_of_crashing(self):
+        with open(self.path, "w", encoding="utf-8") as handle:
+            handle.write("{壊れた")
+        self.assertEqual(bot.end_setting_for(111), (0, None))
+
+    def test_strange_values_fall_back_to_zero(self):
+        with open(self.path, "w", encoding="utf-8") as handle:
+            json.dump({"111": {"end": "20"}, "222": {"end": -5}, "333": 7}, handle)
+        for guild_id in (111, 222, 333):
+            self.assertEqual(bot.end_setting_for(guild_id), (0, None))
+
+    def test_no_temporary_file_is_left_behind(self):
+        bot.save_end_setting(111, 20, "a")
+        self.assertEqual(os.listdir(self.tmp.name), ["panel_settings.json"])
+
+
+class DevPanelLayoutTest(unittest.TestCase):
+    def test_end_choices_come_first(self):
+        rows = bot.DevCountdownPanel().to_components()
+        first = rows[0]["components"]
+        self.assertEqual(len(first), 1)
+        self.assertEqual(first[0]["custom_id"], "kingshot:dev:end")
+        values = [int(option["value"]) for option in first[0]["options"]]
+        self.assertEqual(values, bot.END_CHOICES)
+
+    def test_current_value_is_shown_as_selected(self):
+        select = bot.DevCountdownPanel(current=20).children[0]
+        chosen = [o.value for o in select.options if o.default]
+        self.assertEqual(chosen, ["20"])
+
+    def test_stop_button_sits_alone_on_the_last_row(self):
+        """要望: 終わりを選べても、やり直し用に止めるボタンは残す。"""
+        last = bot.DevCountdownPanel().to_components()[-1]["components"]
+        self.assertEqual(len(last), 1)
+        self.assertEqual(last[0]["custom_id"], "kingshot:dev:stop")
+        self.assertEqual(last[0]["style"], discord.ButtonStyle.danger.value)
+
+    def test_fits_within_discord_limits_even_with_many_presets(self):
+        with mock.patch.object(bot, "PRESETS", list(range(100, 80, -1))):
+            rows = bot.DevCountdownPanel().to_components()
+        self.assertLessEqual(len(rows), 5)
+        for row in rows:
+            self.assertLessEqual(len(row["components"]), 5)
+
+    def test_ids_do_not_collide_with_the_current_panel(self):
+        """試作を貼っても、今のパネルのボタンの動きは変わらない。"""
+        current = {c.custom_id for c in bot.CountdownPanel().children}
+        dev = {c.custom_id for c in bot.DevCountdownPanel().children}
+        self.assertFalse(current & dev)
+        for custom_id in dev:
+            self.assertTrue(custom_id.startswith("kingshot:dev:"), custom_id)
+
+    def test_stays_alive_after_restart(self):
+        panel = bot.DevCountdownPanel()
+        self.assertIsNone(panel.timeout)
+        self.assertTrue(panel.is_persistent())
+
+    def test_current_panel_is_unchanged(self):
+        """/panel は触っていない。行と並びが元のまま。"""
+        rows = bot.CountdownPanel().to_components()
+        self.assertEqual(rows[-1]["components"][0]["custom_id"], "kingshot:stop")
+        self.assertTrue(
+            all(c["type"] == discord.ComponentType.button.value
+                for row in rows for c in row["components"])
+        )
+
+
+class DevPanelBehaviourTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.object(
+            bot, "SETTINGS_PATH", os.path.join(self.tmp.name, "panel_settings.json")
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def interaction(self):
+        interaction = make_interaction()
+        interaction.guild.id = 111
+        interaction.user.__str__ = lambda self: "dentam6626"
+        interaction.response.edit_message = mock.AsyncMock()
+        return interaction
+
+    def button(self, seconds):
+        return next(
+            b for b in bot.DevCountdownPanel().children
+            if getattr(b, "custom_id", "") == f"kingshot:dev:countdown:{seconds}"
+        )
+
+    async def test_button_uses_the_saved_end(self):
+        bot.save_end_setting(111, 20, "dentam6626")
+        interaction = self.interaction()
+
+        with mock.patch.object(bot, "PRESETS", [40]):
+            button = self.button(40)
+        with mock.patch.object(bot, "play_countdown", mock.AsyncMock()) as played:
+            await button.callback(interaction)
+
+        played.assert_awaited_once_with(interaction, 40, 20, reuse_full=True)
+
+    async def test_button_counts_to_zero_when_nothing_is_set(self):
+        interaction = self.interaction()
+
+        with mock.patch.object(bot, "PRESETS", [40]):
+            button = self.button(40)
+        with mock.patch.object(bot, "play_countdown", mock.AsyncMock()) as played:
+            await button.callback(interaction)
+
+        self.assertEqual(played.await_args.args[1:], (40, 0))
+
+    async def test_refuses_when_the_end_is_not_below_the_start(self):
+        bot.save_end_setting(111, 30, "a")
+        interaction = self.interaction()
+
+        with mock.patch.object(bot, "PRESETS", [30]):
+            button = self.button(30)
+        with mock.patch.object(bot, "play_countdown", mock.AsyncMock()) as played:
+            await button.callback(interaction)
+
+        played.assert_not_awaited()
+        self.assertTrue(any("数えられません" in m for m in replies(interaction)))
+
+    async def test_choosing_an_end_saves_it_and_redraws_the_panel(self):
+        interaction = self.interaction()
+        select = bot.DevCountdownPanel().children[0]
+        select._values = ["20"]
+
+        with self.assertLogs("bell", level="INFO") as captured:
+            await select.callback(interaction)
+
+        self.assertEqual(bot.end_setting_for(111), (20, "dentam6626"))
+        interaction.response.edit_message.assert_awaited_once()
+        kwargs = interaction.response.edit_message.await_args.kwargs
+        self.assertIn("20 まで", kwargs["content"])
+        self.assertIn("dentam6626", kwargs["content"])
+        redrawn = [o.value for o in kwargs["view"].children[0].options if o.default]
+        self.assertEqual(redrawn, ["20"])
+        self.assertIn("終わりを 20 に変更", "\n".join(captured.output))
+
+    async def test_says_so_when_the_setting_cannot_be_saved(self):
+        interaction = self.interaction()
+        select = bot.DevCountdownPanel().children[0]
+        select._values = ["20"]
+
+        with mock.patch.object(bot, "save_end_setting", side_effect=OSError("書けない")):
+            with self.assertLogs("bell", level="WARNING") as captured:
+                await select.callback(interaction)
+
+        self.assertIn("保存できませんでした", "\n".join(captured.output))
+        interaction.response.edit_message.assert_not_awaited()
+        self.assertTrue(any("保存できませんでした" in m for m in replies(interaction)))
+
+    async def test_stop_button_logs_like_the_current_one(self):
+        interaction = make_interaction(playing=True)
+        stop = bot.DevCountdownPanel().children[-1]
+
+        with self.assertLogs("bell", level="INFO") as captured:
+            await stop.callback(interaction)
+
+        interaction._voice_client.stop.assert_called_once()
+        self.assertIn("停止（ボタン）", "\n".join(captured.output))
+
+
+class ReuseFullAudioTest(unittest.IsolatedAsyncioTestCase):
+    """試作パネルは start→0 を焼いて、それを切って流す。"""
+
+    async def test_bakes_to_zero_and_plays_the_trimmed_length(self):
+        baked = []
+
+        def fake_ensure(start, end):
+            baked.append((start, end))
+            return "fake.wav"
+
+        full = b"\x00" * (ONE_SECOND * (3 + 40 + 1))
+        interaction = make_interaction()
+
+        with mock.patch.object(bot, "ensure_wav", fake_ensure), \
+                mock.patch.object(bot, "read_pcm", lambda path: full):
+            await bot.play_countdown(interaction, 40, 20, reuse_full=True)
+
+        self.assertEqual(baked, [(40, 0)], "40→20 を新しく焼かない")
+        source = interaction._voice_client.play.call_args.args[0]
+        self.assertEqual(len(source.stream.getvalue()), ONE_SECOND * (3 + 20 + 1))
+        self.assertTrue(any("40 → 20" in m for m in replies(interaction)))
+
+    async def test_command_still_bakes_the_exact_range(self):
+        """/countdown は今までどおり。開始が300でも300→0を焼いたりしない。"""
+        baked = []
+
+        def fake_ensure(start, end):
+            baked.append((start, end))
+            return "fake.wav"
+
+        with mock.patch.object(bot, "ensure_wav", fake_ensure), \
+                mock.patch.object(bot, "read_pcm", lambda path: b"\x00" * ONE_SECOND):
+            await bot.play_countdown(make_interaction(), 65, 40)
+
+        self.assertEqual(baked, [(65, 40)])
 
 
 if __name__ == "__main__":
