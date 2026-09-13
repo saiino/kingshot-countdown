@@ -190,6 +190,19 @@ VOICEVOXは**焼いていない秒数を使うときの保険**でしかない�
   無いと起動時のログに「パネルを貼れませんでした」と出る
 - `/panel` で手で貼ったパネルは対象外。消したり書き換えたりしない
 
+### 日時を指定して試す
+
+`tools/try_startup_panels.py` で「その日時に起動したら、どこに貼るか」を試せる。判定と貼り方はBot本体と同じ関数。
+
+```bash
+.venv\Scripts\python tools\try_startup_panels.py "2026-09-26 19:00"          # 判定だけ（Discordには何もしない）
+.venv\Scripts\python tools\try_startup_panels.py "2026-09-26 19:00" --post   # 実際に貼る
+.venv\Scripts\python tools\try_startup_panels.py --goodbye                     # 貼ったパネルを「おやすみ中」にする
+```
+
+- 貼る先は `.env` のチャンネルID。**本物の493やJYPのIDが書いてあると、そこに貼られる**ので、試すときはテスト用チャンネルのIDにしておく
+- Botを動かしたままでも使える。ただし「前回貼ったパネル」の記録（`announced_panels.json`）はBotと共有なので、Botが起動時に貼ったパネルも消える
+
 ## VOICEVOXはいつ必要か
 
 

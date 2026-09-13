@@ -203,7 +203,7 @@ python -m unittest tests.test_countdown tests.test_voice_countdown
 | `requirements.txt` / `requirements.lock` | 依存の宣言とロック |
 | `.env.example` | `.env` のひな形 |
 | `tests/` | テスト一式 |
-| `tools/` | アイコン・バナーの生成、停止スクリプト |
+| `tools/` | アイコン・バナーの生成、停止スクリプト、起動時パネルの試し打ち |
 | `assets/` | アイコンとバナー |
 | `docs/` | README以外のドキュメント（USAGE / OPERATIONS / NOTES）と画像 |
 | `voice/` | 焼いた音声（生成物。gitには入れない） |
