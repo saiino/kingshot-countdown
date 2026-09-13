@@ -21,10 +21,11 @@ READMEなどから参照するスクリーンショットを置く場所。
 
 ## 貼り方
 
-READMEからは相対パスで参照する。
+相対パスで参照する。直下の README.md からと、`docs/` の中のドキュメントからでは書き方が変わる。
 
 ```markdown
-![アプリを作る](docs/images/01-new-application.png)
+![アプリを作る](docs/images/01-new-application.png)   <!-- README.md から -->
+![アプリを作る](images/01-new-application.png)        <!-- docs/*.md から -->
 ```
 
 画像が無い間はリンク切れの表示になるだけで、他の部分は普通に読める。

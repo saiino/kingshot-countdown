@@ -12,9 +12,9 @@ Discordのボイスチャンネルに残り秒数を読み上げるBotです。
 
 | ドキュメント | 中身 |
 |---|---|
-| **[USAGE.md](USAGE.md)** | 同盟メンバー向けの使い方 |
-| **[OPERATIONS.md](OPERATIONS.md)** | 運用の手引き（起動停止、サーバー追加、覚え書き） |
-| **[NOTES.md](NOTES.md)** | 設計の考え方と、調べた記録 |
+| **[USAGE.md](docs/USAGE.md)** | 同盟メンバー向けの使い方 |
+| **[OPERATIONS.md](docs/OPERATIONS.md)** | 運用の手引き（起動停止、サーバー追加、覚え書き） |
+| **[NOTES.md](docs/NOTES.md)** | 設計の考え方と、調べた記録 |
 
 ---
 
@@ -108,7 +108,7 @@ DISCORD_TOKEN=MTIzNDU2Nzg5...
 > **トークンを含むスクリーンショットは絶対に置かないこと。**
 > このリポジトリは公開なので、画像に写った文字列も読まれます。
 
-> サーバーへの招待手順は [OPERATIONS.md](OPERATIONS.md) にあります。
+> サーバーへの招待手順は [OPERATIONS.md](docs/OPERATIONS.md) にあります。
 
 ---
 
@@ -205,7 +205,7 @@ python -m unittest tests.test_countdown tests.test_voice_countdown
 | `tests/` | テスト一式 |
 | `tools/` | アイコン・バナーの生成、停止スクリプト |
 | `assets/` | アイコンとバナー |
-| `docs/` | ドキュメント用の画像 |
+| `docs/` | README以外のドキュメント（USAGE / OPERATIONS / NOTES）と画像 |
 | `voice/` | 焼いた音声（生成物。gitには入れない） |
 | `logs/` | 動作の記録（生成物。gitには入れない） |
 

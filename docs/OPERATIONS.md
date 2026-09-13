@@ -1,6 +1,6 @@
 # 運用の手引き
 
-実際に動かすときの手順。設計や作り方は [README.md](README.md)、
+実際に動かすときの手順。設計や作り方は [README.md](../README.md)、
 調べた記録は [NOTES.md](NOTES.md)、メンバー向けの使い方は [USAGE.md](USAGE.md)。
 
 ---
