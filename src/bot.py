@@ -22,7 +22,7 @@ import os
 import sys
 import time
 import wave
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import discord
@@ -109,6 +109,10 @@ PANEL_CHANNELS_DOMESTIC = ENV.get("PANEL_CHANNELS_DOMESTIC", "")
 # 鯖戦だった土曜日。鯖戦と国内戦はそれぞれ4週ごとで、2週ずらして交互に来るので、
 # ここから数えて今週がどちらかを判定する（9/12 鯖戦 → 9/26 国内戦 → 10/10 鯖戦）。
 BATTLE_ANCHOR_DATE = ENV.get("BATTLE_ANCHOR_DATE", "2026-09-12")
+
+# 戦闘のチャンネルに貼るのは「戦闘の夜」に起動したときだけ。土曜日いっぱいと、日曜のこの時刻まで。
+# 戦闘中の日曜深夜に再起動しても貼り直せるよう朝までは含め、戦闘後の日曜の昼に起動したときは貼らない。
+BATTLE_NIGHT_ENDS_HOUR = 6
 
 # 起動時に貼ったパネルのメッセージID。次の起動で消す・止まるときに書き換えるのに使う。
 ANNOUNCED_PATH = os.path.join(ROOT, "announced_panels.json")
@@ -565,9 +569,23 @@ def battle_kind(day, anchor_text):
     return {0: "鯖戦", 14: "国内戦"}.get(offset)
 
 
-def channel_ids_for_week(day):
-    """(その週の種類, 貼るチャンネルID) を返す。毎週ぶんに、戦闘がある週のぶんを足す。"""
-    kind = battle_kind(day, BATTLE_ANCHOR_DATE)
+def battle_night(now):
+    """戦闘の夜として扱う土曜日を返す。対象外なら None。
+
+    土曜日いっぱいと、日曜の BATTLE_NIGHT_ENDS_HOUR 時まで。
+    戦闘が終わった日曜の昼に再起動したときは、戦闘のチャンネルに貼らない。
+    """
+    if now.weekday() == 5:
+        return now.date()
+    if now.weekday() == 6 and now.hour < BATTLE_NIGHT_ENDS_HOUR:
+        return now.date() - timedelta(days=1)
+    return None
+
+
+def channel_ids_for(now):
+    """(今夜の種類, 貼るチャンネルID) を返す。毎週ぶんに、戦闘の夜のぶんを足す。"""
+    night = battle_night(now)
+    kind = battle_kind(night, BATTLE_ANCHOR_DATE) if night else None
     extra = {"鯖戦": PANEL_CHANNELS_SERVER_WAR, "国内戦": PANEL_CHANNELS_DOMESTIC}.get(kind, "")
     ids = []
     for channel_id in parse_channel_ids(PANEL_CHANNEL_IDS) + parse_channel_ids(extra):
@@ -676,7 +694,7 @@ class ShutsujinBell(discord.Client):
 
     # ------------------------------------------------------ 起動時のパネル
 
-    async def post_startup_panels(self, today=None):
+    async def post_startup_panels(self, now=None):
         """その週に貼るべきチャンネルにパネルを貼る。
 
         前回の起動で貼ったものは、今回も同じ場所に貼るかどうかに関係なく全部消す。
@@ -684,10 +702,13 @@ class ShutsujinBell(discord.Client):
         先週の場所に「おやすみ中」のパネルが残り続けてしまう。
         新しく貼れば一番下に出るので、チャットが流れていても見つけやすい。
         """
-        today = today or date.today()
-        kind, channel_ids = channel_ids_for_week(today)
+        now = now or datetime.now()
+        kind, channel_ids = channel_ids_for(now)
         if BATTLE_ANCHOR_DATE.strip():
-            log.info(f"今週（{saturday_of(today):%m/%d}）は{kind or '戦闘なし'}")
+            if kind:
+                log.info(f"今夜（{battle_night(now):%m/%d}）は{kind}。{kind}のチャンネルにも貼ります")
+            else:
+                log.info("戦闘の夜ではないので、毎週のチャンネルだけに貼ります")
 
         posted = read_json(ANNOUNCED_PATH)
         if not channel_ids and not posted:

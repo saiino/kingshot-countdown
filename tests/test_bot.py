@@ -895,8 +895,8 @@ class StartupPanelTest(AnnounceTestBase):
         self.assertEqual(self.channel.deleted, [555])
         self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {})
 
-    async def test_posts_to_the_battle_channel_on_a_battle_week(self):
-        from datetime import date
+    async def test_posts_to_the_battle_channel_on_a_battle_night(self):
+        from datetime import datetime
 
         war = FakeChannel(channel_id=222, guild_id=493)
         self.bell.get_channel = {123: self.channel, 222: war}.get
@@ -905,12 +905,29 @@ class StartupPanelTest(AnnounceTestBase):
         with mock.patch.object(bot, "BATTLE_ANCHOR_DATE", "2026-09-12"), \
                 mock.patch.object(bot, "PANEL_CHANNELS_SERVER_WAR", "222"):
             with self.assertLogs("bell", level="INFO") as captured:
-                await self.bell.post_startup_panels(today=date(2026, 10, 10))
+                await self.bell.post_startup_panels(now=datetime(2026, 10, 10, 19, 0))
 
         self.assertEqual(len(war.sent), 1)
         self.assertEqual(len(self.channel.sent), 1, "毎週のチャンネルにも貼る")
-        self.assertIn("今週（10/10）は鯖戦", "\n".join(captured.output))
+        self.assertIn("今夜（10/10）は鯖戦", "\n".join(captured.output))
         self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {"123": 901, "222": 901})
+
+    async def test_skips_the_battle_channel_the_day_after(self):
+        """鯖戦が終わった日曜の昼に起動しても、ゲーム用のサーバーには貼らない。"""
+        from datetime import datetime
+
+        war = FakeChannel(channel_id=222, guild_id=493)
+        self.bell.get_channel = {123: self.channel, 222: war}.get
+        self.channels("123")
+
+        with mock.patch.object(bot, "BATTLE_ANCHOR_DATE", "2026-09-12"), \
+                mock.patch.object(bot, "PANEL_CHANNELS_SERVER_WAR", "222"):
+            with self.assertLogs("bell", level="INFO") as captured:
+                await self.bell.post_startup_panels(now=datetime(2026, 9, 13, 14, 0))
+
+        self.assertEqual(war.sent, [])
+        self.assertEqual(len(self.channel.sent), 1)
+        self.assertIn("戦闘の夜ではない", "\n".join(captured.output))
 
     async def test_old_panel_deleted_by_hand_is_fine(self):
         bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
@@ -1000,20 +1017,33 @@ class ChannelsForWeekTest(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def ids(self, month, day):
-        from datetime import date
+    def ids(self, month, day, hour=19, minute=0):
+        from datetime import datetime
 
-        return bot.channel_ids_for_week(date(2026, month, day))
+        return bot.channel_ids_for(datetime(2026, month, day, hour, minute))
 
-    def test_server_war_week_adds_the_server_war_channels(self):
+    def test_server_war_night_adds_the_server_war_channels(self):
         self.assertEqual(self.ids(9, 12), ("鯖戦", [1, 2, 3]))
 
-    def test_domestic_week_adds_the_domestic_channels_without_duplicates(self):
+    def test_domestic_night_adds_the_domestic_channels_without_duplicates(self):
         self.assertEqual(self.ids(9, 26), ("国内戦", [1, 4]))
 
-    def test_week_without_a_battle_uses_only_the_every_week_channels(self):
+    def test_saturday_without_a_battle_uses_only_the_every_week_channels(self):
         self.assertEqual(self.ids(9, 19), (None, [1]))
 
+    def test_restart_after_midnight_is_still_the_battle_night(self):
+        """戦闘中の日曜深夜に再起動しても、戦闘のチャンネルに貼り直す。"""
+        self.assertEqual(self.ids(9, 13, hour=1), ("鯖戦", [1, 2, 3]))
+        self.assertEqual(self.ids(9, 13, hour=5, minute=59), ("鯖戦", [1, 2, 3]))
+
+    def test_the_day_after_does_not_post_to_the_battle_channel(self):
+        """戦闘が終わった日曜の朝以降に起動しても、ゲーム用のサーバーには貼らない。"""
+        self.assertEqual(self.ids(9, 13, hour=6), (None, [1]))
+        self.assertEqual(self.ids(9, 13, hour=14), (None, [1]))
+
+    def test_weekdays_never_post_to_the_battle_channel(self):
+        self.assertEqual(self.ids(9, 11), (None, [1]))   # 鯖戦前日の金曜
+        self.assertEqual(self.ids(9, 16), (None, [1]))   # 水曜
 
 class ParseChannelIdsTest(unittest.TestCase):
     def test_reads_comma_separated_ids(self):
