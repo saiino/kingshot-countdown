@@ -2,7 +2,7 @@
 
     .venv\\Scripts\\python tools\\try_startup_panels.py "2026-09-26 19:00"          # 判定だけ（Discordには何もしない）
     .venv\\Scripts\\python tools\\try_startup_panels.py "2026-09-26 19:00" --post   # 実際に貼る
-    .venv\\Scripts\\python tools\\try_startup_panels.py --goodbye                     # 貼ったパネルを「おやすみ中」にする
+    .venv\\Scripts\\python tools\\try_startup_panels.py --goodbye                     # 貼ったパネルを「出陣完了」にする
 
 判定と貼り方は src/bot.py と同じ関数を使う。貼る先は .env のチャンネルID。
 試すときはテスト用チャンネルのIDを書いておくこと。本物の493やJYPのIDが書いてあると、そこに貼られる。
@@ -56,7 +56,7 @@ async def run(when, post, goodbye):
         if goodbye:
             await bell.say_goodbye()
     finally:
-        # 終わるときに Bot 本体の後片付け（おやすみ中への書き換え）を走らせない
+        # 終わるときに Bot 本体の後片付け（出陣完了への書き換え）を走らせない
         bell.goodbye_done = True
         await bell.close()
 
@@ -70,7 +70,7 @@ def main():
         help='起動したとみなす日時（例: "2026-09-26 19:00"）。省略すると今',
     )
     parser.add_argument("--post", action="store_true", help="判定だけでなく、実際にパネルを貼る")
-    parser.add_argument("--goodbye", action="store_true", help="貼ってあるパネルを「おやすみ中」に書き換える")
+    parser.add_argument("--goodbye", action="store_true", help="貼ってあるパネルを「出陣完了」に書き換える")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")

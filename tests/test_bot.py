@@ -846,7 +846,7 @@ class StartupPanelTest(AnnounceTestBase):
 
         self.assertEqual(len(self.channel.sent), 1)
         content, view = self.channel.sent[0]
-        self.assertIn("起動しました", content)
+        self.assertIn("待機中", content)
         self.assertIn("ボイスチャンネルに入ってから", content)
         self.assertIsInstance(view, bot.CountdownPanel)
         self.assertEqual(bot.read_json(bot.ANNOUNCED_PATH), {"123": 901})
@@ -958,7 +958,7 @@ class StartupPanelTest(AnnounceTestBase):
         self.assertEqual(len(jyp.sent), 1)
         content, view = jyp.sent[0]
         self.assertIsNone(view, "挨拶にはボタンを付けない")
-        self.assertIn("Good Morning", content)
+        self.assertIn("待機中", content)
         self.assertIn("/panel", content)
         self.assertIn("パネルは493のサーバーに置いてあります", content)
         self.assertNotIn("テストサーバー", content, "テストサーバーの名前は出さない")
@@ -993,7 +993,7 @@ class StartupPanelTest(AnnounceTestBase):
         await self.bell.say_goodbye()
 
         self.assertEqual(len(jyp.edited), 1)
-        self.assertIn("おやすみ中", jyp.edited[0][1])
+        self.assertIn("出陣完了", jyp.edited[0][1])
 
     async def test_old_panel_deleted_by_hand_is_fine(self):
         bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
@@ -1157,7 +1157,7 @@ class GoodbyeTest(AnnounceTestBase):
         self.assertEqual(len(self.channel.edited), 1)
         message_id, content, view = self.channel.edited[0]
         self.assertEqual(message_id, 555)
-        self.assertIn("おやすみ中", content)
+        self.assertIn("出陣完了", content)
         self.assertIsNone(view, "ボタンを外す")
 
     async def test_keeps_the_record_so_the_next_start_can_replace_it(self):
@@ -1181,7 +1181,7 @@ class GoodbyeTest(AnnounceTestBase):
 
         when = datetime(2026, 9, 20, 3, 0)
         text = bot.goodbye_text(when)
-        self.assertIn("おやすみ中", text)
+        self.assertIn("出陣完了", text)
         # 見る人の端末の時刻で出るよう、Discordのタイムスタンプ記法で書く
         self.assertIn(f"<t:{int(when.timestamp())}:f>", text)
 

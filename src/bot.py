@@ -5,7 +5,7 @@
     /stop              … 再生を止めて退出
 
 起動したら .env の PANEL_CHANNEL_IDS のチャンネルにパネルを貼り、
-止まるときにそのパネルを「おやすみ中」へ書き換える。
+止まるときにそのパネルを「出陣完了」へ書き換える。
 
 音声は voice_countdown.py が焼いた wav をそのまま流すだけ。
 Discordのボイスは 48kHz・ステレオ・16bit しか受け取らないが、
@@ -619,8 +619,7 @@ def hello_text(kind, panel_places, panel_command=None):
     """
     lines = [
         "**出陣カウントダウン**",
-        # 止まったときの「💤 出陣ベルはおやすみ中です。バイバイ〜👋」と同じ形にそろえる
-        "☀️ 出陣ベルはいつでも出陣可能です。Good Morning〜👋",
+        STARTUP_NOTE,
         f"使いたかったら {panel_command or '`/panel`'} 打ってね〜",
     ]
     if kind and panel_places:
@@ -628,7 +627,8 @@ def hello_text(kind, panel_places, panel_command=None):
     return "\n".join(lines)
 
 
-STARTUP_NOTE = "🔔 出陣ベル、起動しました！"
+# 起動したときの一言。パネルにも、鯖戦の夜のJYPへの挨拶にも使う
+STARTUP_NOTE = "☀️ 出陣ベル、待機中です！いつでも呼んでね📯"
 
 
 def goodbye_text(now=None):
@@ -641,7 +641,7 @@ def goodbye_text(now=None):
     now = now or datetime.now()
     return (
         "**出陣カウントダウン**\n"
-        "💤 出陣ベルはおやすみ中です。バイバイ〜👋\n"
+        "💤 出陣完了！お疲れさまでした。またね〜👋\n"
         f"-# <t:{int(now.timestamp())}:f> に停止 ・ 次に起動したら、またここでお知らせします"
     )
 
@@ -736,7 +736,7 @@ class ShutsujinBell(discord.Client):
 
         前回の起動で貼ったものは、今回も同じ場所に貼るかどうかに関係なく全部消す。
         週によって貼る場所が変わるので、今回のリストだけを見て消すと、
-        先週の場所に「おやすみ中」のパネルが残り続けてしまう。
+        先週の場所に「出陣完了」のパネルが残り続けてしまう。
         新しく貼れば一番下に出るので、チャットが流れていても見つけやすい。
         """
         now = now or datetime.now()
@@ -859,7 +859,7 @@ class ShutsujinBell(discord.Client):
             await asyncio.sleep(STOP_POLL_SECONDS)
 
     async def say_goodbye(self):
-        """起動時に貼ったパネルを「おやすみ中」に書き換えて、ボタンを外す。
+        """起動時に貼ったパネルを「出陣完了」に書き換えて、ボタンを外す。
 
         停止中に古いボタンが押されて「応答しませんでした」になるのを防ぐ。
         メッセージは消さずに残し、次の起動で消して貼り直す。
