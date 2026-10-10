@@ -865,20 +865,19 @@ class StartupPanelTest(AnnounceTestBase):
                     if isinstance(b, bot.CountdownButton)}
         self.assertEqual(disabled, {45: False, 40: True})
 
-    async def test_reuses_the_message_from_last_time(self):
-        """チャンネルを荒らさないよう、送り直さずに前回のメッセージを書き換える。"""
+    async def test_posts_a_new_message_and_removes_the_old_one(self):
+        """流れるチャンネルでも一番下に出るよう、書き換えずに出し直す。"""
         bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
         self.channels("123")
 
         await self.bell.post_startup_panels()
 
-        self.assertEqual(self.channel.sent, [], "新しく送らない")
-        self.assertEqual(self.channel.deleted, [], "消さない")
-        message_id, content, view = self.channel.edited[0]
-        self.assertEqual(message_id, 555)
+        self.assertEqual(self.channel.edited, [], "書き換えない")
+        content, view = self.channel.sent[0]
         self.assertIn("待機中", content)
         self.assertIsInstance(view, bot.CountdownPanel)
-        self.assertEqual(bot.load_announced(), ({"123": 555}, ["123"]))
+        self.assertEqual(self.channel.deleted, [555], "古いほうは消す")
+        self.assertEqual(bot.load_announced(), ({"123": 901}, ["123"]))
 
     async def test_leaves_a_channel_not_used_tonight_alone(self):
         """鯖戦の夜に493で使ったメッセージは、次の週は「出陣完了」のまま触らない。"""
@@ -1002,8 +1001,8 @@ class StartupPanelTest(AnnounceTestBase):
         self.assertEqual(len(jyp.edited), 1)
         self.assertIn("出陣完了", jyp.edited[0][1])
 
-    async def test_same_message_switches_between_panel_and_greeting(self):
-        """JYPは国内戦の夜はパネル、鯖戦の夜は挨拶。どちらも同じ1通を書き換える。"""
+    async def test_greeting_replaces_last_time_s_panel(self):
+        """JYPは国内戦の夜はパネル、鯖戦の夜は挨拶。前のものは消して出し直す。"""
         from datetime import datetime
 
         war, jyp = self.battle_channels()
@@ -1011,11 +1010,11 @@ class StartupPanelTest(AnnounceTestBase):
 
         await self.bell.post_startup_panels(now=datetime(2026, 10, 10, 19, 0))
 
-        self.assertEqual(jyp.sent, [])
-        message_id, content, view = jyp.edited[0]
-        self.assertEqual(message_id, 700)
+        self.assertEqual(jyp.edited, [])
+        content, view = jyp.sent[0]
         self.assertIn("/panel", content)
-        self.assertIsNone(view, "挨拶に書き換えるときはボタンを外す")
+        self.assertIsNone(view, "挨拶にはボタンを付けない")
+        self.assertEqual(jyp.deleted, [700])
 
     async def test_old_panel_deleted_by_hand_is_fine(self):
         bot.write_json(bot.ANNOUNCED_PATH, {"123": 555})
@@ -1200,22 +1199,20 @@ class PanelCommandTest(AnnounceTestBase):
         interaction.original_response = mock.AsyncMock(return_value=mock.MagicMock(id=950))
         return interaction
 
-    async def test_turns_the_existing_message_into_a_panel(self):
-        """鯖戦の夜のJYPで /panel → 挨拶の1通がパネルになり、メッセージは増えない。"""
+    async def test_posts_a_new_panel_and_removes_the_old_one(self):
+        """流れているチャンネルで /panel → 一番下に出て、古いほうは消える。"""
         bot.write_json(bot.ANNOUNCED_PATH, {"messages": {"123": 700}, "active": []})
         interaction = self.command_interaction()
 
         await bot.panel_command.callback(interaction)
 
-        self.assertEqual(self.channel.sent, [])
-        message_id, content, view = self.channel.edited[0]
-        self.assertEqual(message_id, 700)
-        self.assertIn("待機中", content)
-        self.assertIsInstance(view, bot.CountdownPanel)
+        self.assertEqual(self.channel.edited, [], "書き換えない")
         call = interaction.response.send_message.await_args
-        self.assertTrue(call.kwargs.get("ephemeral"), "リンクは打った人にだけ見せる")
-        self.assertIn("/123/700", call.args[0])
-        self.assertEqual(bot.load_announced(), ({"123": 700}, ["123"]), "止まるとき出陣完了にする")
+        self.assertIn("待機中", call.args[0])
+        self.assertIsInstance(call.kwargs.get("view"), bot.CountdownPanel)
+        self.assertFalse(call.kwargs.get("ephemeral", False), "みんなに見える形で出す")
+        self.assertEqual(self.channel.deleted, [700], "古いほうは消す")
+        self.assertEqual(bot.load_announced(), ({"123": 950}, ["123"]), "止まるとき出陣完了にする")
 
     async def test_posts_and_remembers_when_the_channel_has_nothing(self):
         interaction = self.command_interaction()
@@ -1227,7 +1224,7 @@ class PanelCommandTest(AnnounceTestBase):
         self.assertFalse(call.kwargs.get("ephemeral", False))
         self.assertEqual(bot.load_announced(), ({"123": 950}, ["123"]))
 
-    async def test_posts_again_if_the_old_message_was_deleted_by_hand(self):
+    async def test_posts_fine_if_the_old_message_was_deleted_by_hand(self):
         bot.write_json(bot.ANNOUNCED_PATH, {"messages": {"123": 700}, "active": ["123"]})
         self.channel.missing.add(700)
         interaction = self.command_interaction()

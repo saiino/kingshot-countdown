@@ -754,9 +754,9 @@ class ShutsujinBell(discord.Client):
     async def post_startup_panels(self, now=None):
         """その夜に使うチャンネルに、パネルか挨拶を出す。
 
-        チャンネルを荒らさないよう、メッセージは増やさない。前回の起動で出した
-        メッセージがあればそれを書き換えて使い回し、無ければ（手で消されていたら）
-        新しく送る。その夜に使わないチャンネルのメッセージは「出陣完了」のまま触らない。
+        メッセージは毎回いちばん下に出し直し、古いほうを消す。読み上げBotのお知らせで
+        チャンネルが流れると、書き換えでは上に埋もれて見つからないため。
+        その夜に使わないチャンネルのメッセージは「出陣完了」のまま触らない。
         """
         now = now or datetime.now()
         kind, channel_ids = channel_ids_for(now)
@@ -784,7 +784,7 @@ class ShutsujinBell(discord.Client):
                 continue
             end, _ = end_setting_for(channel.guild.id)
             key = str(channel_id)
-            message_id = await self.show(
+            message_id = await self.place(
                 channel,
                 messages.get(key),
                 panel_text(channel.guild.id, note=STARTUP_NOTE),
@@ -805,7 +805,7 @@ class ShutsujinBell(discord.Client):
             if channel is None:
                 continue
             key = str(channel_id)
-            message_id = await self.show(
+            message_id = await self.place(
                 channel,
                 messages.get(key),
                 hello_text(kind, places, self.panel_command_mention(channel.guild.id)),
@@ -838,22 +838,15 @@ class ShutsujinBell(discord.Client):
             return None
         return channel
 
-    async def show(self, channel, message_id, content, view, what):
-        """前回のメッセージがあれば書き換え、無ければ新しく送る。
+    async def place(self, channel, previous_id, content, view, what):
+        """いちばん下に新しく出して、そのチャンネルの前のメッセージを消す。
 
-        返り値は使ったメッセージのID。出せなかったときは None。
-        view=None を渡すとボタンを外す（挨拶はボタン無し）。
+        書き換えで使い回すと、読み上げBotのお知らせなどで流れるチャンネルでは
+        上に埋もれて見つからない。毎回出し直せば、いつも一番下にある。
+        先に出してから消すので、出せなかったときは前のものが残る。
+        返り値は新しいメッセージのID。出せなかったときは None。
+        view=None ならボタン無し（挨拶）。
         """
-        if message_id is not None:
-            try:
-                await channel.get_partial_message(int(message_id)).edit(content=content, view=view)
-                log.info(f"{what}に書き換えました「{channel.guild.name} / {channel.name}」")
-                return int(message_id)
-            except discord.NotFound:
-                pass  # 手で消されていた。新しく送る
-            except (discord.HTTPException, ValueError, TypeError) as exc:
-                log.warning(f"前回のメッセージを書き換えられませんでした（{message_id}）: {exc}。新しく送ります")
-
         try:
             if view is None:
                 message = await channel.send(content)
@@ -865,8 +858,20 @@ class ShutsujinBell(discord.Client):
                 "（そのチャンネルでBotに「チャンネルを見る」「メッセージを送信」の権限があるか確認）"
             )
             return None
-        log.info(f"{what}を送りました「{channel.guild.name} / {channel.name}」")
+
+        log.info(f"{what}を出しました「{channel.guild.name} / {channel.name}」")
+        if previous_id is not None:
+            await self.delete_quietly(channel, previous_id)
         return message.id
+
+    async def delete_quietly(self, channel, message_id):
+        """前のメッセージを消す。無ければ何もしない。"""
+        try:
+            await channel.get_partial_message(int(message_id)).delete()
+        except discord.NotFound:
+            pass  # 手で消されていた
+        except (discord.HTTPException, ValueError, TypeError) as exc:
+            log.warning(f"前のメッセージを消せませんでした（{message_id}）: {exc}")
 
     def save_announced(self, messages, active):
         try:
@@ -970,40 +975,28 @@ async def countdown_command(
 @client.tree.command(name="panel", description="カウントダウンのボタンを設置します")
 @app_commands.guild_only()
 async def panel_command(interaction: discord.Interaction):
-    """パネルを出す。チャンネルを荒らさないよう、メッセージは増やさない。
+    """パネルをいちばん下に出す。
 
-    そのチャンネルにBotの1通（起動時の挨拶や「出陣完了」）があれば、それをパネルに
-    書き換えて、打った人にだけリンクを返す。無ければ新しく出し、以後はそれを
-    そのチャンネルの1通として使い回す（止まるときに「出陣完了」になる）。
+    そのチャンネルに前のパネル（や挨拶、「出陣完了」）があれば、新しく出してから
+    古いほうを消す。チャンネルが流れていても、打てば必ず一番下に出てくる。
+    残るBotのメッセージは常に1通で、止まるときに「出陣完了」になる。
     """
+    log_use(interaction, "パネルを設置")
     guild_id = interaction.guild.id
     channel = interaction.channel
     key = str(channel.id)
     end, _ = end_setting_for(guild_id)
-    content = panel_text(guild_id, note=STARTUP_NOTE)
     messages, active = load_announced()
 
-    if key in messages:
-        partial = channel.get_partial_message(int(messages[key]))
-        try:
-            await partial.edit(content=content, view=CountdownPanel(current=end))
-        except discord.NotFound:
-            pass  # 手で消されていた。新しく出す
-        except (discord.HTTPException, ValueError, TypeError) as exc:
-            log.warning(f"前回のメッセージを書き換えられませんでした（{messages[key]}）: {exc}。新しく出します")
-        else:
-            log_use(interaction, "パネルを設置（前のメッセージを書き換え）")
-            if key not in active:
-                active.append(key)
-            client.save_announced(messages, active)
-            await interaction.response.send_message(
-                f"パネルはこちらです → {partial.jump_url}", ephemeral=True
-            )
-            return
-
-    log_use(interaction, "パネルを設置")
-    await interaction.response.send_message(content, view=CountdownPanel(current=end))
+    await interaction.response.send_message(
+        panel_text(guild_id, note=STARTUP_NOTE), view=CountdownPanel(current=end)
+    )
     message = await interaction.original_response()
+
+    previous = messages.get(key)
+    if previous is not None:
+        await client.delete_quietly(channel, previous)
+
     messages[key] = message.id
     if key not in active:
         active.append(key)
